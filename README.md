@@ -349,7 +349,7 @@ EasyCite: 清空项目记忆
 ## 从源码开发
 
 ```bash
-git clone https://github.com/theburningmuses/EasyCite.git
+git clone https://github.com/ReSakuma/EasyCite.git
 cd EasyCite
 
 npm ci

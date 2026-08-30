@@ -11,4 +11,4 @@
 - “输出 -> EasyCite”中的相关日志，请删除论文隐私内容和 API Key
 - 可以复现问题的最小步骤
 
-Bug 和功能建议请提交到 [GitHub Issues](https://github.com/theburningmuses/EasyCite/issues)。请勿在公开 Issue 中粘贴 API Key、未公开论文全文、私人 Zotero 数据或其他敏感信息。
+Bug 和功能建议请提交到 [GitHub Issues](https://github.com/ReSakuma/EasyCite/issues)。请勿在公开 Issue 中粘贴 API Key、未公开论文全文、私人 Zotero 数据或其他敏感信息。
