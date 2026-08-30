@@ -1,0 +1,8 @@
+# V3 optional local embedding dependencies.
+#
+# Install inside the project virtual environment:
+#   .venv/bin/python -m pip install -r requirements-embedding.txt
+#
+# The current implementation uses fastembed + ONNX Runtime for CPU inference.
+# Model files are downloaded on first use into the configured cache directory.
+fastembed==0.8.0

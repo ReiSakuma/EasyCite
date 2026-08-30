@@ -1,0 +1,14 @@
+# Development and test dependencies for EasyCite v0.
+#
+# Install after requirements.txt inside the project virtual environment:
+#   .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
+#
+# Keep packaging unpinned here because requirements.txt pins the runtime version.
+colorama==0.4.6
+iniconfig==2.3.0
+pluggy==1.6.0
+pygments==2.20.0
+PyHamcrest==2.1.0
+pytest==9.1.1
+python-jsonrpc-server==0.4.0
+ujson==5.13.0

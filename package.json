@@ -1,0 +1,568 @@
+{
+    "name": "easycite",
+    "displayName": "EasyCite",
+    "description": "Verifiable citation recommendations for LaTeX writing.",
+    "version": "0.20.0",
+    "preview": true,
+    "serverInfo": {
+        "name": "EasyCite",
+        "module": "citation-agent"
+    },
+    "publisher": "theburningmuses",
+    "license": "MIT",
+    "homepage": "https://github.com/ReiSakuma/EasyCite",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ReiSakuma/EasyCite.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ReiSakuma/EasyCite/issues"
+    },
+    "galleryBanner": {
+        "color": "#1e415e",
+        "theme": "dark"
+    },
+    "keywords": [
+        "latex",
+        "bibtex",
+        "citation",
+        "research"
+    ],
+    "engines": {
+        "vscode": "^1.78.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "capabilities": {
+        "virtualWorkspaces": {
+            "supported": false,
+            "description": "Virtual Workspaces are not supported with EasyCite."
+        }
+    },
+    "activationEvents": [
+        "onLanguage:latex",
+        "workspaceContains:**/*.tex",
+        "onCommand:citation-agent.auditSelection",
+        "onCommand:citation-agent.auditDiagnosticRange",
+        "onCommand:citation-agent.scanTexProject",
+        "onCommand:citation-agent.clearDiagnostic",
+        "onCommand:citation-agent.clearAllDiagnostics",
+        "onCommand:citation-agent.configureProvider",
+        "onCommand:citation-agent.configureZoteroScope",
+        "onCommand:citation-agent.setupWizard",
+        "onCommand:citation-agent.resumeCandidateReview",
+        "onCommand:citation-agent.openAgentState",
+        "onCommand:citation-agent.openRunTrace",
+        "onCommand:citation-agent.exportEvalBadCase",
+        "onCommand:citation-agent.clearProjectMemory",
+        "onCommand:citation-agent.openToolHealth"
+    ],
+    "main": "./dist/extension.js",
+    "scripts": {
+        "vscode:prepublish": "npm run package",
+        "compile": "webpack",
+        "watch": "webpack --watch",
+        "package": "webpack --mode production --devtool source-map --config ./webpack.config.js",
+        "compile-tests": "tsc -p . --outDir out",
+        "watch-tests": "tsc -p . -w --outDir out",
+        "pretest": "npm run compile-tests && npm run compile && npm run lint",
+        "lint": "eslint src",
+        "format-check": "prettier --check 'src/**/*.ts' '.github/**/*.yml'",
+        "test": "node ./out/test/runTest.js",
+        "vendor-python-runtime": ".venv/bin/python scripts/vendor_python_runtime.py",
+        "eval": ".venv/bin/python eval/run_eval.py --cases eval/cases/nerf_slam_claims.jsonl --output eval/reports/latest.json --markdown-output eval/reports/latest.md",
+        "vsce-package": "vsce package --no-dependencies -o easycite-v20.vsix",
+        "vsce-package-windows": "vsce package --no-dependencies --ignoreFile .vscodeignore.windows --target win32-x64 -o easycite-v20-Windows.vsix"
+    },
+    "contributes": {
+        "configuration": {
+            "properties": {
+                "citation-agent.cwd": {
+                    "default": "${workspaceFolder}",
+                    "description": "Sets the working directory for EasyCite. Supported variables: `${workspaceFolder}` (workspace root) and `${fileDirname}` (directory of the current file).",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.args": {
+                    "default": [],
+                    "description": "Arguments passed to the EasyCite Python backend. Each argument is a separate item in the array.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "scope": "resource",
+                    "type": "array"
+                },
+                "citation-agent.path": {
+                    "default": [],
+                    "description": "Reserved for a future external EasyCite executable. V2 normally uses the bundled Python backend.",
+                    "scope": "resource",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "citation-agent.importStrategy": {
+                    "default": "useBundled",
+                    "description": "Defines where EasyCite imports bundled Python libraries from. This setting may be ignored if `citation-agent.path` is set.",
+                    "enum": [
+                        "useBundled",
+                        "fromEnvironment"
+                    ],
+                    "enumDescriptions": [
+                        "Always use bundled Python libraries.",
+                        "Use Python libraries from the selected environment, falling back to bundled libraries only if unavailable."
+                    ],
+                    "scope": "window",
+                    "type": "string"
+                },
+                "citation-agent.interpreter": {
+                    "default": [],
+                    "description": "When set to a path to python executable, extension will use that to launch the server and any subprocess.",
+                    "scope": "resource",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "citation-agent.showNotifications": {
+                    "default": "off",
+                    "description": "Controls when notifications are shown by this extension.",
+                    "enum": [
+                        "off",
+                        "onError",
+                        "onWarning",
+                        "always"
+                    ],
+                    "enumDescriptions": [
+                        "All notifications are turned off, any errors or warning are still available in the logs.",
+                        "Notifications are shown only in the case of an error.",
+                        "Notifications are shown for errors and warnings.",
+                        "Notifications are show for anything that the server chooses to show."
+                    ],
+                    "scope": "machine",
+                    "type": "string"
+                },
+                "citation-agent.dependencyInstallMode": {
+                    "default": "ask",
+                    "description": "Controls whether EasyCite installs missing Python runtime packages into the extension private storage directory.",
+                    "enum": [
+                        "ask",
+                        "always",
+                        "never"
+                    ],
+                    "enumDescriptions": [
+                        "Ask before installing missing Python packages.",
+                        "Install missing Python packages automatically into extension private storage.",
+                        "Never install packages automatically; only report missing dependencies."
+                    ],
+                    "scope": "machine",
+                    "type": "string"
+                },
+                "citation-agent.useLLM": {
+                    "default": false,
+                    "description": "When enabled, EasyCite V2 uses LiteLLM for citation-need detection. If disabled or unavailable, it falls back to local heuristic rules.",
+                    "scope": "machine",
+                    "type": "boolean"
+                },
+                "citation-agent.provider": {
+                    "default": "openai",
+                    "description": "Model provider label used for EasyCite configuration and logging.",
+                    "scope": "machine",
+                    "type": "string"
+                },
+                "citation-agent.model": {
+                    "default": "gpt-4o-mini",
+                    "description": "LiteLLM model name for citation-need detection.",
+                    "scope": "machine",
+                    "type": "string"
+                },
+                "citation-agent.apiBase": {
+                    "default": "",
+                    "description": "Optional API base URL for OpenAI-compatible or private model gateways. API keys are stored in VS Code SecretStorage, not in settings.",
+                    "scope": "machine",
+                    "type": "string"
+                },
+                "citation-agent.timeoutSeconds": {
+                    "default": 60,
+                    "description": "Timeout in seconds for lightweight LLM calls such as citation-need detection and retrieval query planning.",
+                    "minimum": 5,
+                    "maximum": 180,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.evidenceTimeoutSeconds": {
+                    "default": 60,
+                    "description": "Timeout in seconds for each external LLM evidence-judging call. When it times out, EasyCite falls back to local rules for that candidate.",
+                    "minimum": 3,
+                    "maximum": 180,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.evidenceMaxLLMCandidates": {
+                    "default": 8,
+                    "description": "Maximum number of shortlisted candidates judged by the external LLM during one audit. Set this to maxAbstractCandidates to judge every shortlisted candidate.",
+                    "minimum": 0,
+                    "maximum": 8,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.contextQueryBudgetTokens": {
+                    "default": 3200,
+                    "description": "Estimated input-token budget for LLM retrieval query planning. Required claim fields are retained; paragraph context and local query hints may be compacted.",
+                    "minimum": 512,
+                    "maximum": 32000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.contextEvidenceBudgetTokens": {
+                    "default": 9000,
+                    "description": "Estimated input-token budget for each LLM evidence-verification request. Candidate identifiers remain intact while long passage text may be compacted.",
+                    "minimum": 2048,
+                    "maximum": 64000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.contextTranslationBudgetTokens": {
+                    "default": 5000,
+                    "description": "Estimated input-token budget for each bilingual evidence translation request.",
+                    "minimum": 1024,
+                    "maximum": 32000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.agentRuntime": {
+                    "default": "langgraph",
+                    "description": "Backend recommendation orchestrator. V10 uses a real LangGraph StateGraph by default; classic keeps the pre-v9 linear orchestrator as a fallback.",
+                    "enum": [
+                        "langgraph",
+                        "classic"
+                    ],
+                    "enumDescriptions": [
+                        "Run the citation recommendation workflow through a LangGraph StateGraph.",
+                        "Use the pre-v9 in-process linear orchestrator."
+                    ],
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.maxSuggestions": {
+                    "default": 5,
+                    "description": "Maximum number of citation candidates returned from local BibTeX and Zotero sources.",
+                    "minimum": 0,
+                    "maximum": 20,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.maxMetadataCandidates": {
+                    "default": 50,
+                    "description": "Maximum number of metadata candidates recalled before evidence verification.",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.maxAbstractCandidates": {
+                    "default": 8,
+                    "description": "Maximum number of candidates sent to abstract/PDF evidence verification.",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.maxEvidencePassages": {
+                    "default": 5,
+                    "description": "Maximum number of abstract/PDF passages read per candidate during evidence verification.",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.enableEvidenceVerification": {
+                    "default": true,
+                    "description": "When enabled, EasyCite ranks candidates by retrieved abstract/PDF evidence instead of metadata alone.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.embeddingEnabled": {
+                    "default": false,
+                    "description": "Enable V3 local semantic passage ranking. When disabled or unavailable, EasyCite falls back to deterministic lexical evidence ranking.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.embeddingModelProvider": {
+                    "default": "fastembed",
+                    "description": "Provider for the local embedding model. V3 currently supports fastembed for CPU ONNX inference; 'hash' is reserved for deterministic development tests.",
+                    "enum": [
+                        "fastembed",
+                        "hash"
+                    ],
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.embeddingModelId": {
+                    "default": "BAAI/bge-small-en-v1.5",
+                    "description": "Model identifier for local semantic passage retrieval.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.embeddingCacheDir": {
+                    "default": "",
+                    "description": "Optional local cache directory for downloaded embedding models. Empty means EasyCite uses ~/.cache/citation-agent/embeddings.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.embeddingAutoDownload": {
+                    "default": "ask",
+                    "description": "Controls first-run embedding model download behavior.",
+                    "enum": [
+                        "ask",
+                        "never",
+                        "always"
+                    ],
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.embeddingTopK": {
+                    "default": 12,
+                    "description": "Number of hybrid-ranked passages retained before truncating to maxEvidencePassages for LLM judgment.",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.hybridLexicalWeight": {
+                    "default": 0.35,
+                    "description": "Lexical score weight used by V3 hybrid evidence passage ranking.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.hybridEmbeddingWeight": {
+                    "default": 0.65,
+                    "description": "Embedding similarity weight used by V3 hybrid evidence passage ranking.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.scanUseEmbedding": {
+                    "default": true,
+                    "description": "Use the local embedding model to semantically refine background citation-needed scan diagnostics. Requires embeddingEnabled and a running EasyCite backend; otherwise lexical scan is used.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.scanEmbeddingThreshold": {
+                    "default": 0.56,
+                    "description": "Minimum cosine similarity to citation-needed prototype claims for keeping an automatically scanned yellow diagnostic.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.scanMaxSentences": {
+                    "default": 300,
+                    "description": "Maximum number of lexical citation-scan candidate sentences sent to the embedding model per scanned TeX file.",
+                    "minimum": 1,
+                    "maximum": 2000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.zoteroEnabled": {
+                    "default": false,
+                    "description": "Enable the optional read-only Zotero HTTP adapter. Current BibTeX search works without Zotero.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.zoteroEndpoint": {
+                    "default": "",
+                    "description": "Optional local Zotero-compatible HTTP endpoint. V2 tries GET /search?q=... and /items?q=..., expecting JSON items with title and optional citationKey/pdfPath.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.zoteroAutoOpenWithoutPrompt": {
+                    "default": false,
+                    "description": "When enabled, EasyCite automatically launches Zotero if the configured local Zotero API is unavailable.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.zoteroLaunchCommand": {
+                    "default": "",
+                    "description": "Optional custom command used to launch Zotero. Empty means EasyCite uses a platform default that prefers minimized/background startup when possible.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.zoteroCollectionKeys": {
+                    "default": [],
+                    "description": "Optional Zotero collection keys used to limit candidate search. Empty means EasyCite searches the whole local Zotero library.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "scope": "resource",
+                    "type": "array"
+                },
+                "citation-agent.debugTargetPapers": {
+                    "default": [],
+                    "description": "Optional target papers to trace through every citation recommendation stage. Add a title fragment, citation key, DOI, or Zotero-searchable phrase to diagnose why a known paper was not recommended.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "scope": "resource",
+                    "type": "array"
+                },
+                "citation-agent.memoryEnabled": {
+                    "default": true,
+                    "description": "Use project-local feedback memory to softly boost accepted papers and demote rejected papers for similar future citation claims.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.memoryPath": {
+                    "default": "",
+                    "description": "Optional custom SQLite path for EasyCite feedback memory. Empty stores memory under the workspace .citation-agent directory.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.memoryPositiveBoost": {
+                    "default": 0.08,
+                    "description": "Maximum confidence boost applied to previously accepted papers for similar claims.",
+                    "minimum": 0,
+                    "maximum": 0.25,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.memoryNegativePenalty": {
+                    "default": 0.18,
+                    "description": "Maximum confidence penalty applied to previously rejected papers for similar claims.",
+                    "minimum": 0,
+                    "maximum": 0.5,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.memoryMinSimilarity": {
+                    "default": 0.22,
+                    "description": "Minimum token-overlap similarity between the current claim and prior feedback before feedback memory affects ranking.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.developerMode": {
+                    "default": false,
+                    "description": "Show developer-only debugging and eval tools, including Bad Case export in the candidate review panel. Keep disabled for normal writing workflows.",
+                    "scope": "resource",
+                    "type": "boolean"
+                }
+            }
+        },
+        "commands": [
+            {
+                "title": "检查选中内容",
+                "category": "EasyCite",
+                "command": "citation-agent.auditSelection"
+            },
+            {
+                "title": "配置模型服务",
+                "category": "EasyCite",
+                "command": "citation-agent.configureProvider"
+            },
+            {
+                "title": "设置向导",
+                "category": "EasyCite",
+                "command": "citation-agent.setupWizard"
+            },
+            {
+                "title": "打开工具健康检查",
+                "category": "EasyCite",
+                "command": "citation-agent.openToolHealth"
+            },
+            {
+                "title": "配置 Zotero 文献范围",
+                "category": "EasyCite",
+                "command": "citation-agent.configureZoteroScope"
+            },
+            {
+                "title": "返回候选审核",
+                "category": "EasyCite",
+                "command": "citation-agent.resumeCandidateReview"
+            },
+            {
+                "title": "打开运行状态",
+                "category": "EasyCite",
+                "command": "citation-agent.openAgentState"
+            },
+            {
+                "title": "打开运行 Trace",
+                "category": "EasyCite",
+                "command": "citation-agent.openRunTrace"
+            },
+            {
+                "title": "导出 Eval Bad Case",
+                "category": "EasyCite",
+                "command": "citation-agent.exportEvalBadCase"
+            },
+            {
+                "title": "清空项目记忆",
+                "category": "EasyCite",
+                "command": "citation-agent.clearProjectMemory"
+            },
+            {
+                "title": "清除全部引用标记",
+                "category": "EasyCite",
+                "command": "citation-agent.clearAllDiagnostics"
+            },
+            {
+                "title": "扫描当前 TeX 工程引用标记",
+                "category": "EasyCite",
+                "command": "citation-agent.scanTexProject"
+            },
+            {
+                "title": "Restart Server",
+                "category": "EasyCite",
+                "command": "citation-agent.restart"
+            }
+        ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "citation-agent.openAgentState",
+                    "when": "config.citation-agent.developerMode == true"
+                },
+                {
+                    "command": "citation-agent.openRunTrace",
+                    "when": "config.citation-agent.developerMode == true"
+                },
+                {
+                    "command": "citation-agent.exportEvalBadCase",
+                    "when": "config.citation-agent.developerMode == true"
+                },
+                {
+                    "command": "citation-agent.restart",
+                    "when": "config.citation-agent.developerMode == true"
+                }
+            ]
+        }
+    },
+    "dependencies": {
+        "@vscode/python-environments": "^1.0.0",
+        "@vscode/python-extension": "^1.0.6",
+        "fs-extra": "^11.3.5",
+        "vscode-languageclient": "^8.1.0"
+    },
+    "devDependencies": {
+        "@types/fs-extra": "^11.0.4",
+        "@types/glob": "^8.1.0",
+        "@types/node": "20.x",
+        "@types/vscode": "1.78.0",
+        "@typescript-eslint/eslint-plugin": "^8.62.1",
+        "@typescript-eslint/parser": "^8.57.0",
+        "@vscode/test-electron": "^2.5.2",
+        "@vscode/vsce": "^3.7.1",
+        "eslint": "^10.3.0",
+        "glob": "^13.0.6",
+        "prettier": "^3.8.3",
+        "ts-loader": "^9.6.2",
+        "typescript": "^5.9.3",
+        "webpack": "^5.108.3",
+        "webpack-cli": "^7.1.0"
+    }
+}
