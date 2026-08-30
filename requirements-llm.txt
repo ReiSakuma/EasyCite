@@ -5,5 +5,5 @@
 #
 # API keys must be configured through the VS Code command
 # "EasyCite: 配置模型服务" and stored in SecretStorage.
-litellm==1.93.0
+litellm==1.98.0
 pydantic==2.13.4
