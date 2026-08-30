@@ -1,0 +1,138 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://citation-agent.local/v2/audit-claim.schema.json",
+    "title": "EasyCite v2 Audit Claim Protocol",
+    "type": "object",
+    "required": ["method", "params", "result"],
+    "properties": {
+        "method": {
+            "const": "citationAgent/auditClaim"
+        },
+        "params": {
+            "type": "object",
+            "required": ["workspace_path", "file_path", "line_start", "line_end", "claim", "context", "existing_citations"],
+            "properties": {
+                "workspace_path": { "type": "string" },
+                "file_path": { "type": "string" },
+                "line_start": { "type": "integer", "minimum": 0 },
+                "line_end": { "type": "integer", "minimum": 0 },
+                "claim": { "type": "string", "minLength": 1 },
+                "context": { "type": "string" },
+                "existing_citations": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            },
+            "additionalProperties": true
+        },
+        "result": {
+            "type": "object",
+            "required": ["citation_needed", "reason", "confidence", "claim_type", "source", "suggestions", "recommended_rewrite"],
+            "properties": {
+                "citation_needed": { "type": "boolean" },
+                "reason": { "type": "string" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "claim_type": {
+                    "enum": [
+                        "background",
+                        "related_work_summary",
+                        "method_claim",
+                        "empirical_result",
+                        "definition",
+                        "common_knowledge",
+                        "writing_only",
+                        "other"
+                    ]
+                },
+                "source": {
+                    "enum": ["llm", "heuristic"]
+                },
+                "recommended_rewrite": {
+                    "type": ["string", "null"]
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "paper_id",
+                            "title",
+                            "citation_key",
+                            "authors",
+                            "year",
+                            "venue",
+                            "doi",
+                            "url",
+                            "pdf_path",
+                            "verdict",
+                            "confidence",
+                            "source",
+                            "evidence",
+                            "reason"
+                        ],
+                        "properties": {
+                            "paper_id": { "type": "string" },
+                            "title": { "type": "string" },
+                            "citation_key": {
+                                "type": ["string", "null"]
+                            },
+                            "authors": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "year": {
+                                "type": ["string", "null"]
+                            },
+                            "venue": {
+                                "type": ["string", "null"]
+                            },
+                            "doi": {
+                                "type": ["string", "null"]
+                            },
+                            "url": {
+                                "type": ["string", "null"]
+                            },
+                            "pdf_path": {
+                                "type": ["string", "null"]
+                            },
+                            "verdict": {
+                                "enum": [
+                                    "metadata_match",
+                                    "direct_support",
+                                    "partial_support",
+                                    "related_only",
+                                    "contradiction",
+                                    "insufficient_evidence"
+                                ]
+                            },
+                            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                            "source": {
+                                "enum": ["mock", "current_bib", "zotero", "online"]
+                            },
+                            "evidence": {
+                                "type": "object",
+                                "required": ["page", "section", "text"],
+                                "properties": {
+                                    "page": {
+                                        "type": ["integer", "null"],
+                                        "minimum": 1
+                                    },
+                                    "section": {
+                                        "type": ["string", "null"]
+                                    },
+                                    "text": {
+                                        "type": ["string", "null"]
+                                    }
+                                },
+                                "additionalProperties": true
+                            },
+                            "reason": { "type": "string" }
+                        },
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "additionalProperties": true
+        }
+    }
+}

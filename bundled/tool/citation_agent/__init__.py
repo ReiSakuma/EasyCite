@@ -1,0 +1,2 @@
+"""EasyCite backend package."""
+
