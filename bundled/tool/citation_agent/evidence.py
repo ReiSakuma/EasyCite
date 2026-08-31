@@ -102,7 +102,11 @@ class EvidenceRetriever:
     ) -> list[EvidenceSnippet]:
         passages: list[Passage] = []
         passages.extend(self._metadata_passages(suggestion, profile))
-        passages.extend(self._pdf_passages(suggestion, profile))
+        rag_passages = self._indexed_passages(suggestion, profile)
+        passages.extend(rag_passages)
+        if not any(passage.source == "pdf" for passage in rag_passages):
+            passages.extend(self._pdf_passages(suggestion, profile))
+        passages = dedupe_passages(passages)
         query = evidence_query_text(claim=claim, profile=profile)
         passages = rank_evidence_passages(
             query=query,
@@ -128,6 +132,48 @@ class EvidenceRetriever:
             )
             for passage in passages[: self.max_passages]
         ]
+
+    def _indexed_passages(
+        self, suggestion: CitationSuggestion, profile: ClaimProfile
+    ) -> list[Passage]:
+        """Reuse passages selected by the RAG retriever instead of reparsing the PDF."""
+        passages: list[Passage] = []
+        for snippet in suggestion.evidence_passages:
+            text = str(snippet.text or "").strip()
+            if not text:
+                continue
+            quality = analyze_evidence_quality(
+                text,
+                source=snippet.source,
+                suggestion=suggestion,
+                profile=profile,
+            )
+            if quality.discard:
+                continue
+            passages.append(
+                Passage(
+                    text=text,
+                    source=snippet.source,
+                    section=snippet.section,
+                    page=snippet.page,
+                    score=snippet.score or score_text_against_claim(profile, text),
+                    quality_score=snippet.quality_score or quality.quality_score,
+                    is_own_claim=snippet.is_own_claim
+                    if snippet.is_own_claim is not None
+                    else quality.is_own_claim,
+                    is_related_work_summary=snippet.is_related_work_summary
+                    if snippet.is_related_work_summary is not None
+                    else quality.is_related_work_summary,
+                    supports_core_mechanism=snippet.supports_core_mechanism
+                    if snippet.supports_core_mechanism is not None
+                    else quality.supports_core_mechanism,
+                    citation_density=snippet.citation_density
+                    if snippet.citation_density is not None
+                    else quality.citation_density,
+                    quality_flags=tuple(snippet.quality_flags or quality.flags),
+                )
+            )
+        return passages
 
     def _metadata_passages(
         self, suggestion: CitationSuggestion, profile: ClaimProfile
@@ -958,6 +1004,19 @@ def passage_sort_key(passage: Passage) -> tuple[float, int, int, str, str]:
     text = re.sub(r"\s+", " ", passage.text or "").strip().lower()
     quality = getattr(passage, "quality_score", 1.0)
     return (-round(passage.score, 6), -round(quality, 6), source_priority, page, section.lower(), text)
+
+
+def dedupe_passages(passages: list[Passage]) -> list[Passage]:
+    best: dict[tuple[str, int | None, str], Passage] = {}
+    for passage in passages:
+        normalized = re.sub(r"\s+", " ", passage.text or "").strip().lower()
+        if not normalized:
+            continue
+        key = (passage.source, passage.page, normalized)
+        previous = best.get(key)
+        if previous is None or passage.score > previous.score:
+            best[key] = passage
+    return list(best.values())
 
 
 def evidence_query_text(claim: str | None, profile: ClaimProfile) -> str:

@@ -178,3 +178,89 @@ class EmbeddingConfig:
             lexical_weight=float(os.getenv("CITATION_AGENT_HYBRID_LEXICAL_WEIGHT", "0.35")),
             embedding_weight=float(os.getenv("CITATION_AGENT_HYBRID_EMBEDDING_WEIGHT", "0.65")),
         )
+
+
+@dataclass(frozen=True)
+class RagConfig:
+    """Runtime configuration for the persistent local academic RAG pipeline."""
+
+    enabled: bool = True
+    index_path: str | None = None
+    max_documents: int = 500
+    child_chunk_tokens: int = 280
+    child_chunk_max_tokens: int = 420
+    chunk_overlap_tokens: int = 48
+    parent_chunk_tokens: int = 900
+    embedding_batch_size: int = 32
+    paper_lexical_top_k: int = 50
+    paper_dense_top_k: int = 50
+    paper_fused_top_k: int = 30
+    passage_lexical_top_k: int = 60
+    passage_dense_top_k: int = 60
+    passage_fused_top_k: int = 50
+    pdf_index_top_k: int = 12
+    reranker_enabled: bool = True
+    reranker_model_id: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    reranker_input_k: int = 50
+    reranker_top_k: int = 20
+    max_passages_per_paper: int = 3
+    rrf_k: int = 60
+    bm25_weight: float = 1.0
+    dense_weight: float = 1.2
+    chunker_version: str = "v21.parent-child.1"
+
+    @classmethod
+    def from_env(cls) -> "RagConfig":
+        return cls(
+            enabled=_truthy(os.getenv("CITATION_AGENT_RAG_ENABLED", "true")),
+            index_path=os.getenv("CITATION_AGENT_RAG_INDEX_PATH") or None,
+            max_documents=int(os.getenv("CITATION_AGENT_RAG_MAX_DOCUMENTS", "500")),
+            child_chunk_tokens=int(os.getenv("CITATION_AGENT_RAG_CHILD_CHUNK_TOKENS", "280")),
+            child_chunk_max_tokens=int(
+                os.getenv("CITATION_AGENT_RAG_CHILD_CHUNK_MAX_TOKENS", "420")
+            ),
+            chunk_overlap_tokens=int(
+                os.getenv("CITATION_AGENT_RAG_CHUNK_OVERLAP_TOKENS", "48")
+            ),
+            parent_chunk_tokens=int(os.getenv("CITATION_AGENT_RAG_PARENT_CHUNK_TOKENS", "900")),
+            embedding_batch_size=int(
+                os.getenv("CITATION_AGENT_RAG_EMBEDDING_BATCH_SIZE", "32")
+            ),
+            paper_lexical_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PAPER_LEXICAL_TOP_K", "50")
+            ),
+            paper_dense_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PAPER_DENSE_TOP_K", "50")
+            ),
+            paper_fused_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PAPER_FUSED_TOP_K", "30")
+            ),
+            passage_lexical_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PASSAGE_LEXICAL_TOP_K", "60")
+            ),
+            passage_dense_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PASSAGE_DENSE_TOP_K", "60")
+            ),
+            passage_fused_top_k=int(
+                os.getenv("CITATION_AGENT_RAG_PASSAGE_FUSED_TOP_K", "50")
+            ),
+            pdf_index_top_k=int(os.getenv("CITATION_AGENT_RAG_PDF_INDEX_TOP_K", "12")),
+            reranker_enabled=_truthy(
+                os.getenv("CITATION_AGENT_RAG_RERANKER_ENABLED", "true")
+            ),
+            reranker_model_id=os.getenv(
+                "CITATION_AGENT_RAG_RERANKER_MODEL_ID",
+                "Xenova/ms-marco-MiniLM-L-6-v2",
+            ),
+            reranker_input_k=int(os.getenv("CITATION_AGENT_RAG_RERANKER_INPUT_K", "50")),
+            reranker_top_k=int(os.getenv("CITATION_AGENT_RAG_RERANKER_TOP_K", "20")),
+            max_passages_per_paper=int(
+                os.getenv("CITATION_AGENT_RAG_MAX_PASSAGES_PER_PAPER", "3")
+            ),
+            rrf_k=int(os.getenv("CITATION_AGENT_RAG_RRF_K", "60")),
+            bm25_weight=float(os.getenv("CITATION_AGENT_RAG_BM25_WEIGHT", "1.0")),
+            dense_weight=float(os.getenv("CITATION_AGENT_RAG_DENSE_WEIGHT", "1.2")),
+            chunker_version=os.getenv(
+                "CITATION_AGENT_RAG_CHUNKER_VERSION", "v21.parent-child.1"
+            ),
+        )

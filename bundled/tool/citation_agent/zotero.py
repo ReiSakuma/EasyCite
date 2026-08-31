@@ -46,6 +46,7 @@ class ZoteroClient:
         self.collection_keys = [key.strip() for key in (collection_keys or []) if key.strip()]
         self.logger = logger
         self.last_error: BaseException | None = None
+        self._scope_items_by_paper_id: dict[str, Any] = {}
 
     def clear_last_error(self) -> None:
         self.last_error = None
@@ -86,6 +87,83 @@ class ZoteroClient:
             if len(suggestions) >= limit:
                 break
         return suggestions
+
+    def list_scope(
+        self,
+        limit: int = 500,
+        *,
+        resolve_pdf_paths: bool = True,
+    ) -> list[CitationSuggestion]:
+        """List citable papers in the configured Collection scope for RAG indexing."""
+        if not self.endpoint or limit <= 0:
+            return []
+        if not self._looks_like_zotero_api():
+            return self.search("", limit=limit, metadata_limit=limit)
+
+        api_root = self.endpoint.rstrip("/")
+        if not api_root.endswith("/api"):
+            api_root = f"{api_root}/api"
+
+        merged_items: dict[str, Any] = {}
+        for path in zotero_search_paths(self.collection_keys):
+            start = 0
+            while len(merged_items) < limit:
+                page_size = min(100, limit - len(merged_items))
+                query = urllib.parse.urlencode(
+                    {"limit": str(page_size), "start": str(start), "format": "json"}
+                )
+                payload = self._request_url_json(f"{api_root}{path}?{query}")
+                if payload is None:
+                    break
+                items = payload if isinstance(payload, list) else payload.get("items", [])
+                if not items:
+                    break
+                for item in items:
+                    identity = extract_item_key(item) or zotero_title(item)
+                    if identity and identity not in merged_items and is_citable_zotero_item(item):
+                        merged_items[identity] = item
+                        if len(merged_items) >= limit:
+                            break
+                if len(items) < page_size:
+                    break
+                start += len(items)
+
+        items = list(merged_items.values())[:limit]
+        self._log(
+            "Zotero RAG corpus sync found "
+            f"{len(items)} citable item(s) in collection scope="
+            f"{self.collection_keys or ['<all>']}."
+        )
+        citation_keys = self._fetch_better_bibtex_citation_keys(items)
+        suggestions: list[CitationSuggestion] = []
+        self._scope_items_by_paper_id = {}
+        for item in items:
+            item_key = extract_item_key(item)
+            suggestion = zotero_item_to_suggestion(
+                item,
+                bbt_citation_key=citation_keys.get(item_key or ""),
+                pdf_path=self._resolve_pdf_path(item) if resolve_pdf_paths else None,
+            )
+            if suggestion:
+                suggestions.append(suggestion)
+                self._scope_items_by_paper_id[suggestion.paper_id] = item
+        return suggestions
+
+    def resolve_pdf_paths(self, paper_ids: list[str]) -> dict[str, str]:
+        """Resolve attachments only for papers selected by paper-level retrieval."""
+        resolved: dict[str, str] = {}
+        for paper_id in dict.fromkeys(paper_ids):
+            item = self._scope_items_by_paper_id.get(paper_id)
+            if item is None:
+                continue
+            pdf_path = self._resolve_pdf_path(item)
+            if pdf_path:
+                resolved[paper_id] = pdf_path
+        self._log(
+            f"Zotero lazy PDF resolution found {len(resolved)} attachment(s) "
+            f"for {len(set(paper_ids))} paper(s)."
+        )
+        return resolved
 
     def _looks_like_zotero_api(self) -> bool:
         parsed = urllib.parse.urlparse(self.endpoint)

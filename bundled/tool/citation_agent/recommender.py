@@ -1246,7 +1246,43 @@ def choose_better_duplicate(
             (suggestion.citation_key or suggestion.paper_id).lower(),
         )
 
-    return max([first, second], key=score)
+    chosen = max([first, second], key=score)
+    alternate = second if chosen is first else first
+    chosen_evidence_is_metadata = chosen.evidence.source == "metadata"
+    alternate_has_content = alternate.evidence.source in {"abstract", "pdf"}
+    return chosen.model_copy(
+        update={
+            "citation_key": chosen.citation_key or alternate.citation_key,
+            "authors": chosen.authors or alternate.authors,
+            "year": chosen.year or alternate.year,
+            "venue": chosen.venue or alternate.venue,
+            "doi": chosen.doi or alternate.doi,
+            "url": chosen.url or alternate.url,
+            "pdf_path": chosen.pdf_path or alternate.pdf_path,
+            "evidence": alternate.evidence
+            if chosen_evidence_is_metadata and alternate_has_content
+            else chosen.evidence,
+            "evidence_passages": dedupe_evidence_snippets(
+                [*chosen.evidence_passages, *alternate.evidence_passages]
+            ),
+        }
+    )
+
+
+def dedupe_evidence_snippets(snippets: list) -> list:
+    seen: set[tuple[str, int | None, str]] = set()
+    result = []
+    for snippet in snippets:
+        key = (
+            str(snippet.source),
+            snippet.page,
+            re.sub(r"\s+", " ", str(snippet.text or "")).strip().lower(),
+        )
+        if not key[2] or key in seen:
+            continue
+        seen.add(key)
+        result.append(snippet)
+    return result
 
 
 def mark_diagnostic_suggestion(

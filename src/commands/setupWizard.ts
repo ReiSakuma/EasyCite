@@ -43,7 +43,7 @@ export async function maybeShowFirstRunSetup(
         return;
     }
     const action = await vscode.window.showInformationMessage(
-        'EasyCite: 首次使用建议运行设置向导，检查 Python、Zotero、Better BibTeX、模型 API、embedding 和 PDF 读取能力。',
+        'EasyCite: 首次使用建议运行设置向导，检查 Python、Zotero、Better BibTeX、模型 API、本地 RAG 和 PDF 读取能力。',
         '开始设置',
         '稍后',
     );
@@ -63,7 +63,7 @@ export async function runSetupWizard(
         [
             {
                 label: '完整设置',
-                description: '检查 Python、Zotero/Better BibTeX、模型 API、embedding 和 PDF 依赖',
+                description: '检查 Python、Zotero/Better BibTeX、模型 API、本地 RAG 和 PDF 依赖',
                 action: 'full',
             },
             {
@@ -260,8 +260,8 @@ async function configureEmbedding(context: vscode.ExtensionContext, namespace: s
     const choice = await vscode.window.showQuickPick<WizardChoice>(
         [
             {
-                label: '启用本地 embedding 检索',
-                description: '推荐。CPU ONNX 语义检索，用于 evidence passage 排序',
+                label: '启用本地 RAG 语义检索',
+                description: '推荐。论文级与段落级 BM25 + Dense + RRF，并支持 Cross-Encoder 精排',
                 action: 'fastembed',
             },
             {
@@ -275,8 +275,8 @@ async function configureEmbedding(context: vscode.ExtensionContext, namespace: s
             },
         ],
         {
-            title: 'EasyCite: Embedding 模型',
-            placeHolder: '选择 evidence 语义检索方式',
+            title: 'EasyCite: 本地 RAG',
+            placeHolder: '选择论文与 evidence passage 的语义检索方式',
             ignoreFocusOut: true,
         },
     );
@@ -285,6 +285,7 @@ async function configureEmbedding(context: vscode.ExtensionContext, namespace: s
     }
 
     const config = vscode.workspace.getConfiguration('citation-agent');
+    await config.update('ragEnabled', true, vscode.ConfigurationTarget.Workspace);
     await config.update('embeddingEnabled', true, vscode.ConfigurationTarget.Workspace);
     await config.update('embeddingModelProvider', choice.action, vscode.ConfigurationTarget.Workspace);
     if (choice.action === 'hash') {

@@ -8,9 +8,9 @@ EasyCite 不会直接替用户决定引用。所有候选、证据和 BibTeX 写
 
 - 自动扫描 TeX 工程，在疑似缺少引用的句子下显示黄色波浪线和灯泡操作。
 - 检查选中的 Claim，并结合段落上下文理解待引用观点。
-- 同时检索当前 `.bib` 文件和 Zotero Local API，支持限定 Zotero Collection。
-- 使用词法相关度与本地 Embedding 进行混合召回和 Evidence Passage 排序。
-- 读取 Zotero 摘要与 PDF，每篇候选最多保留少量高相关证据片段。
+- 将当前 `.bib` 与所选 Zotero Collection 同步为项目私有、可增量更新的本地 RAG 语料库。
+- 在论文级和段落级分别执行 BM25 + Dense 双路召回，并通过 RRF 融合与 Cross-Encoder 精排。
+- 按章节和句子边界切分摘要/PDF，使用 parent-child chunk 保留证据页码与上下文。
 - 使用 LLM 完成查询规划、证据验证和中英对照，区分直接支持、部分支持、基础性支持与证据不足。
 - 在候选审核界面比较论文、证据、页码、DOI、来源和 Citation Key。
 - 支持多选引用，在英文句末标点前插入 `\cite{...}`。
@@ -25,10 +25,11 @@ EasyCite 不会直接替用户决定引用。所有候选、证据和 BibTeX 写
 TeX Claim
   -> Claim 理解
   -> LLM 查询规划
-  -> 当前 BibTeX / Zotero 召回
+  -> 当前 BibTeX / Zotero Collection 语料同步
   -> 标题与 DOI 去重
-  -> 元数据和 Embedding 排序
-  -> 摘要 / PDF Evidence 提取
+  -> 论文级 BM25 + Dense + RRF 召回
+  -> 段落级 BM25 + Dense + RRF 召回
+  -> Cross-Encoder Evidence 精排
   -> LLM 证据验证
   -> 用户审核候选
   -> 插入 \cite{} 与 BibTeX
@@ -55,8 +56,8 @@ TeX Claim
 
 在 GitHub Releases 下载与环境匹配的文件：
 
-- Windows 本地 VS Code：`easycite-v20-Windows.vsix`
-- Linux 或运行在 WSL Remote Extension Host 中的 VS Code：`easycite-v20.vsix`
+- Windows 本地 VS Code：`easycite-v21-Windows.vsix`
+- Linux 或运行在 WSL Remote Extension Host 中的 VS Code：`easycite-v21.vsix`
 
 如果以前安装过旧版扩展，请先卸载旧扩展，避免两个版本注册相同的兼容命令。
 
@@ -67,19 +68,19 @@ TeX Claim
 1. 打开左侧“扩展”。
 2. 点击扩展面板右上角的 `...`。
 3. 选择“从 VSIX 安装...”。
-4. 选择下载的 `easycite-v20*.vsix`。
+4. 选择下载的 `easycite-v21*.vsix`。
 5. 安装完成后点击“重新加载”。
 
 也可以在终端安装：
 
 ```bash
-code --install-extension easycite-v20.vsix
+code --install-extension easycite-v21.vsix
 ```
 
 Windows PowerShell：
 
 ```powershell
-code --install-extension .\easycite-v20-Windows.vsix
+code --install-extension .\easycite-v21-Windows.vsix
 ```
 
 ### 3. WSL 用户注意事项
@@ -177,7 +178,7 @@ openrouter/openai/gpt-4o-mini
 EasyCite: 配置模型服务
 ```
 
-### 第四步：Embedding 模型
+### 第四步：本地 RAG 与 Embedding 模型
 
 推荐选择“启用本地 embedding 检索”，保持默认模型：
 
@@ -186,6 +187,12 @@ BAAI/bge-small-en-v1.5
 ```
 
 EasyCite 使用 FastEmbed 与 ONNX 在本地 CPU 上运行。首次使用会下载模型到配置的缓存目录，耗时取决于网络；后续运行直接使用缓存。
+
+首次检索会读取所选 Collection 的论文元数据和摘要，建立 `.citation-agent/rag.sqlite3`。论文级召回完成后，默认只为最相关的 12 篇论文定位并索引 PDF，避免用户等待全库 PDF 解析。索引记录论文/PDF 指纹，后续查询会复用已有内容，并按需逐步补充新的高相关 PDF。点击“重新审计”会重新执行查询规划、双路召回、RRF、精排和 LLM 验证，但不会无意义地重建未变化的 PDF 索引。
+
+RAG 的默认流程为：论文级 BM25 + Dense 召回、RRF 融合、段落级 BM25 + Dense 召回、RRF 融合、Cross-Encoder 精排、LLM 证据验证。Embedding 或精排模型不可用时，Trace 会明确显示原因，并降级到 BM25 或确定性本地 reranker。
+
+高级设置 `citation-agent.ragPdfIndexTopK` 控制单次前台查询最多新增索引多少篇 PDF，默认值为 `12`。减小它可以降低首次等待时间，但更多候选会暂时只使用摘要证据。
 
 `hash embedding` 只用于离线开发测试，不具备真实语义检索能力。
 
@@ -264,7 +271,7 @@ Existing methods rely on offline global optimization \cite{paperA,paperB}.
 EasyCite: 配置 Zotero 文献范围
 ```
 
-选择一个或多个 Collection 后，后续候选只从这些 Collection 中检索。切换到“全部文库”可以恢复全库搜索。
+选择一个或多个 Collection 后，后续 RAG 语料只包含这些 Collection 和当前工程 `.bib` 中的论文。切换到“全部文库”可以恢复全库同步。Collection 或 PDF 发生变化时，下一次检索会自动增量更新索引。
 
 ### 项目反馈记忆
 
@@ -380,8 +387,8 @@ npm run vsce-package-windows
 
 输出文件：
 
-- `easycite-v20.vsix`
-- `easycite-v20-Windows.vsix`
+- `easycite-v21.vsix`
+- `easycite-v21-Windows.vsix`
 
 ## 项目结构
 

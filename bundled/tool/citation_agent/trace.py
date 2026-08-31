@@ -34,11 +34,11 @@ class TraceRecorder:
         before: int | None = None,
         after: int | None = None,
         error: str | None = None,
+        latency_ms: float | None = None,
         candidates: Iterable[CitationSuggestion] | None = None,
         identity: Callable[[CitationSuggestion], str] | None = None,
     ) -> None:
         started_at = self._stage_started_at.pop(stage, None)
-        latency_ms = None
         if started_at is not None:
             latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         candidate_keys = []

@@ -2,7 +2,7 @@
     "name": "easycite",
     "displayName": "EasyCite",
     "description": "Verifiable citation recommendations for LaTeX writing.",
-    "version": "0.20.0",
+    "version": "0.21.0",
     "preview": true,
     "serverInfo": {
         "name": "EasyCite",
@@ -72,8 +72,8 @@
         "test": "node ./out/test/runTest.js",
         "vendor-python-runtime": ".venv/bin/python scripts/vendor_python_runtime.py",
         "eval": ".venv/bin/python eval/run_eval.py --cases eval/cases/nerf_slam_claims.jsonl --output eval/reports/latest.json --markdown-output eval/reports/latest.md",
-        "vsce-package": "vsce package --no-dependencies -o easycite-v20.vsix",
-        "vsce-package-windows": "vsce package --no-dependencies --ignoreFile .vscodeignore.windows --target win32-x64 -o easycite-v20-Windows.vsix"
+        "vsce-package": "vsce package --no-dependencies -o easycite-v21.vsix",
+        "vsce-package-windows": "vsce package --no-dependencies --ignoreFile .vscodeignore.windows --target win32-x64 -o easycite-v21-Windows.vsix"
     },
     "contributes": {
         "configuration": {
@@ -282,6 +282,110 @@
                     "description": "When enabled, EasyCite ranks candidates by retrieved abstract/PDF evidence instead of metadata alone.",
                     "scope": "resource",
                     "type": "boolean"
+                },
+                "citation-agent.ragEnabled": {
+                    "default": true,
+                    "description": "Use the persistent local RAG pipeline for corpus sync, paper retrieval, passage retrieval and reranking. If unavailable, EasyCite reports the fallback and uses legacy metadata retrieval.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.ragIndexPath": {
+                    "default": "",
+                    "description": "Optional path for the SQLite/FTS5 RAG index. Empty stores it under .citation-agent/rag.sqlite3 in the workspace.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.ragMaxDocuments": {
+                    "default": 500,
+                    "description": "Maximum citable papers synchronized from the selected Zotero Collection and current project bibliography.",
+                    "minimum": 1,
+                    "maximum": 5000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragChildChunkTokens": {
+                    "default": 280,
+                    "description": "Target token size of child chunks used for precise passage retrieval.",
+                    "minimum": 80,
+                    "maximum": 800,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragChildChunkMaxTokens": {
+                    "default": 420,
+                    "description": "Maximum token size of a child RAG chunk.",
+                    "minimum": 120,
+                    "maximum": 1200,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragChunkOverlapTokens": {
+                    "default": 48,
+                    "description": "Sentence-aware overlap between adjacent child chunks.",
+                    "minimum": 0,
+                    "maximum": 300,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragParentChunkTokens": {
+                    "default": 900,
+                    "description": "Target token size of parent chunks retained for section context.",
+                    "minimum": 300,
+                    "maximum": 3000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragPaperFusedTopK": {
+                    "default": 30,
+                    "description": "Number of papers retained after paper-level BM25/Dense reciprocal-rank fusion.",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragPassageFusedTopK": {
+                    "default": 50,
+                    "description": "Number of passages retained after passage-level BM25/Dense reciprocal-rank fusion.",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragPdfIndexTopK": {
+                    "default": 12,
+                    "description": "Maximum paper-level finalists whose Zotero PDF attachments are resolved and incrementally indexed in one foreground query.",
+                    "minimum": 0,
+                    "maximum": 50,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragRerankerEnabled": {
+                    "default": true,
+                    "description": "Rerank fused evidence passages with a local Cross-Encoder when its model is available.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.ragRerankerModelId": {
+                    "default": "Xenova/ms-marco-MiniLM-L-6-v2",
+                    "description": "FastEmbed Cross-Encoder model used for passage reranking.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "citation-agent.ragRerankerInputK": {
+                    "default": 50,
+                    "description": "Maximum fused passages passed to the local reranker.",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragRerankerTopK": {
+                    "default": 20,
+                    "description": "Maximum passages retained after reranking and before per-paper diversity selection.",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "scope": "resource",
+                    "type": "number"
                 },
                 "citation-agent.embeddingEnabled": {
                     "default": false,

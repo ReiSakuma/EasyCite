@@ -11,7 +11,7 @@ from langgraph.graph import END, StateGraph
 from citation_agent.agent_state import build_agent_state_snapshot, save_agent_run_record
 from citation_agent.bibliography import BibRepository
 from citation_agent.claim_analysis import ClaimProfile, build_claim_profile
-from citation_agent.config import ModelConfig, SourceConfig
+from citation_agent.config import EmbeddingConfig, ModelConfig, RagConfig, SourceConfig
 from citation_agent.query_planner import RetrievalQueryPlan
 from citation_agent.recommender import (
     RecommendationBundle,
@@ -33,11 +33,17 @@ from citation_agent.recommender import (
     suggestion_identity,
 )
 from citation_agent.schemas import CitationSuggestion
+from citation_agent.rag import RagDocument, RagRetriever
+from citation_agent.rag.models import RagRetrievalStats
 from citation_agent.trace import TraceRecorder, summarize_candidates
 from citation_agent.memory_lifecycle.service import MemoryService
 from citation_agent.cache import stable_text_hash
 from citation_agent.checkpoint.run_store import RunStore
-from citation_agent.tools.adapters import execute_zotero_search
+from citation_agent.tools.adapters import (
+    execute_zotero_pdf_resolution,
+    execute_zotero_scope_list,
+    execute_zotero_search,
+)
 from citation_agent.tools.observability import get_tool_observations, reset_tool_observations
 
 import citation_agent.recommender as recommender_module
@@ -54,6 +60,9 @@ class RecommendationGraphState(TypedDict, total=False):
     target_trace: list[str]
     debug_targets: list[str]
     model_config: ModelConfig
+    embedding_config: EmbeddingConfig
+    rag_config: RagConfig
+    rag_stats: RagRetrievalStats
     model_snapshot: dict[str, Any]
     source_snapshot: dict[str, Any]
     max_suggestions: int
@@ -63,6 +72,7 @@ class RecommendationGraphState(TypedDict, total=False):
     retrieval_plan: RetrievalQueryPlan
     bib_suggestions: list[CitationSuggestion]
     zotero_suggestions: list[CitationSuggestion]
+    rag_suggestions: list[CitationSuggestion]
     forced_target_probe_suggestions: list[CitationSuggestion]
     suggestions: list[CitationSuggestion]
     deduped: list[CitationSuggestion]
@@ -215,6 +225,8 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
         after=0,
     )
     model_config = ModelConfig.from_env()
+    embedding_config = EmbeddingConfig.from_env()
+    rag_config = RagConfig.from_env()
     trace.record(
         "llm_config",
         (
@@ -246,6 +258,22 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
         before=0,
         after=0,
     )
+    trace.record(
+        "rag_config",
+        (
+            "Local RAG snapshot: "
+            f"enabled={rag_config.enabled}, max_documents={rag_config.max_documents}, "
+            f"child_tokens={rag_config.child_chunk_tokens}, "
+            f"overlap_tokens={rag_config.chunk_overlap_tokens}, "
+            f"parent_tokens={rag_config.parent_chunk_tokens}, "
+            f"embedding={'enabled' if embedding_config.enabled else 'disabled'}, "
+            f"embedding_model={embedding_config.model_id}, "
+            f"reranker={'enabled' if rag_config.reranker_enabled else 'disabled'}, "
+            f"reranker_model={rag_config.reranker_model_id}."
+        ),
+        before=0,
+        after=0,
+    )
     model_snapshot = {
         "use_llm": model_config.use_llm,
         "api_key": "set" if model_config.api_key else "missing",
@@ -270,6 +298,10 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
         "enable_evidence_verification": source_config.enable_evidence_verification,
         "agent_runtime": source_config.agent_runtime,
         "memory_enabled": source_config.memory_enabled,
+        "rag_enabled": rag_config.enabled,
+        "rag_index_path": rag_config.index_path or "<workspace>/.citation-agent/rag.sqlite3",
+        "rag_embedding_model": embedding_config.model_id,
+        "rag_reranker_model": rag_config.reranker_model_id,
         "force_refresh": force_refresh,
     }
     target_trace: list[str] = []
@@ -284,6 +316,9 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
         "force_refresh": force_refresh,
         "trace": trace,
         "model_config": model_config,
+        "embedding_config": embedding_config,
+        "rag_config": rag_config,
+        "rag_stats": RagRetrievalStats(),
         "model_snapshot": model_snapshot,
         "source_snapshot": source_snapshot,
         "target_trace": target_trace,
@@ -291,6 +326,7 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
         "max_suggestions": max(source_config.max_suggestions, 0),
         "bib_suggestions": [],
         "zotero_suggestions": [],
+        "rag_suggestions": [],
         "forced_target_probe_suggestions": [],
         "suggestions": [],
         "diagnostic_suggestions": [],
@@ -407,14 +443,21 @@ def recall_current_bib_node(state: RecommendationGraphState) -> RecommendationGr
     trace = state["trace"]
     params = state["params"]
     trace.start("current_bib_search")
-    bib_suggestions = BibRepository(
+    repository = BibRepository(
         workspace_path=str(params.get("workspace_path") or ""),
         file_path=str(params.get("file_path") or ""),
-    ).search(state["claim"], limit=state["metadata_limit"])
+    )
+    if state["rag_config"].enabled:
+        bib_suggestions = repository.all_suggestions(limit=state["rag_config"].max_documents)
+        action = "RAG corpus sync"
+    else:
+        bib_suggestions = repository.search(state["claim"], limit=state["metadata_limit"])
+        action = "search"
     suggestions = [*state.get("suggestions", []), *bib_suggestions]
     trace.record(
         "current_bib_search",
-        f"Current BibTeX search returned {len(bib_suggestions)} candidate(s): {summarize_candidates(bib_suggestions)}.",
+        f"Current BibTeX {action} returned {len(bib_suggestions)} item(s): "
+        f"{summarize_candidates(bib_suggestions)}.",
         before=0,
         after=len(bib_suggestions),
         candidates=bib_suggestions,
@@ -437,6 +480,8 @@ def recall_zotero_node(state: RecommendationGraphState) -> RecommendationGraphSt
     suggestions = list(state.get("suggestions", []))
     forced_target_probe_suggestions: list[CitationSuggestion] = []
     zotero_suggestions: list[CitationSuggestion] = []
+    rag_suggestions: list[CitationSuggestion] = []
+    zotero_client = None
     _log(
         state.get("logger"),
         "Zotero config: "
@@ -456,20 +501,29 @@ def recall_zotero_node(state: RecommendationGraphState) -> RecommendationGraphSt
             collection_keys=source_config.zotero_collection_keys,
             logger=state.get("logger"),
         )
-        zotero_suggestions = execute_zotero_search(
-            zotero_client,
-            claim=state["claim"],
-            limit=state["metadata_limit"],
-            query_phrases=state["retrieval_plan"].queries,
-            metadata_limit=state["metadata_limit"],
-            fallback_candidates=state.get("bib_suggestions", []),
-        )
+        if state["rag_config"].enabled:
+            zotero_suggestions = execute_zotero_scope_list(
+                zotero_client,
+                limit=state["rag_config"].max_documents,
+                resolve_pdf_paths=False,
+                fallback_candidates=state.get("bib_suggestions", []),
+            )
+        else:
+            zotero_suggestions = execute_zotero_search(
+                zotero_client,
+                claim=state["claim"],
+                limit=state["metadata_limit"],
+                query_phrases=state["retrieval_plan"].queries,
+                metadata_limit=state["metadata_limit"],
+                fallback_candidates=state.get("bib_suggestions", []),
+            )
         before = len(suggestions)
         suggestions.extend(zotero_suggestions)
         trace.record(
             "zotero_retrieval",
             (
-                f"Zotero retrieval returned {len(zotero_suggestions)} candidate(s) "
+                f"Zotero {'RAG corpus sync' if state['rag_config'].enabled else 'retrieval'} "
+                f"returned {len(zotero_suggestions)} item(s) "
                 f"from collection scope={source_config.zotero_collection_keys or ['<all>']}: "
                 f"{summarize_candidates(zotero_suggestions)}."
             ),
@@ -527,9 +581,186 @@ def recall_zotero_node(state: RecommendationGraphState) -> RecommendationGraphSt
                 ),
             )
         _log(state.get("logger"), f"Zotero candidate search returned {len(zotero_suggestions)} usable item(s).")
+    if state["rag_config"].enabled:
+        corpus = dedupe_suggestions(
+            [*state.get("bib_suggestions", []), *zotero_suggestions],
+            logger=state.get("logger"),
+        )
+        documents = [
+            RagDocument.from_suggestion(
+                suggestion,
+                collection_keys=source_config.zotero_collection_keys,
+            )
+            for suggestion in corpus
+        ]
+        zotero_by_identity = {
+            suggestion_identity(suggestion): suggestion
+            for suggestion in zotero_suggestions
+            if suggestion.source == "zotero"
+        }
+
+        def hydrate_rag_documents(selected: list[RagDocument]) -> list[RagDocument]:
+            if zotero_client is None:
+                return selected
+            matches: dict[str, CitationSuggestion] = {}
+            for document in selected:
+                match = zotero_by_identity.get(suggestion_identity(document.to_suggestion()))
+                if match:
+                    matches[document.document_id] = match
+            paths = execute_zotero_pdf_resolution(
+                zotero_client,
+                [match.paper_id for match in matches.values()],
+            )
+            return [
+                replace(
+                    document,
+                    pdf_path=(
+                        paths.get(matches[document.document_id].paper_id)
+                        if document.document_id in matches
+                        else document.pdf_path
+                    ),
+                )
+                for document in selected
+            ]
+        try:
+            retriever = RagRetriever(
+                workspace_path=str(state["params"].get("workspace_path") or ""),
+                config=state["rag_config"],
+                embedding_config=state["embedding_config"],
+                logger=state.get("logger"),
+            )
+            result = retriever.retrieve(
+                claim=state["claim"],
+                queries=state["retrieval_plan"].queries,
+                profile=state["profile"],
+                documents=documents,
+                rebuild_index=bool(state["params"].get("rebuild_rag_index")),
+                document_hydrator=hydrate_rag_documents,
+            )
+            rag_suggestions = result.suggestions
+            stats = result.stats
+            trace.record(
+                "rag_index_sync",
+                (
+                    f"RAG index sync: documents={stats.documents_seen}, "
+                    f"indexed={stats.documents_indexed}, reused={stats.documents_reused}, "
+                    f"failed={stats.documents_failed}, new_chunks={stats.chunks_indexed}, "
+                    f"metadata_sync_ms={stats.metadata_sync_ms}, "
+                    f"index={stats.index_path}."
+                ),
+                before=len(corpus),
+                after=stats.documents_seen - stats.documents_failed,
+                latency_ms=stats.metadata_sync_ms,
+            )
+            trace.record(
+                "rag_paper_hybrid_retrieval",
+                (
+                    f"Paper retrieval BM25={stats.paper_lexical_hits}, "
+                    f"Dense={stats.paper_dense_hits}, RRF={stats.paper_fused_hits}; "
+                    f"embedding_used={stats.embedding_used}, "
+                    f"latency_ms={stats.paper_retrieval_ms}."
+                ),
+                before=stats.documents_seen,
+                after=stats.paper_fused_hits,
+                latency_ms=stats.paper_retrieval_ms,
+            )
+            trace.record(
+                "rag_pdf_index",
+                (
+                    f"Lazy PDF indexing requested={stats.pdf_documents_requested}, "
+                    f"resolved={stats.pdf_documents_hydrated}, "
+                    f"latency_ms={stats.pdf_index_ms}."
+                ),
+                before=stats.pdf_documents_requested,
+                after=stats.pdf_documents_hydrated,
+                latency_ms=stats.pdf_index_ms,
+            )
+            trace.record(
+                "rag_passage_hybrid_retrieval",
+                (
+                    f"Passage retrieval BM25={stats.passage_lexical_hits}, "
+                    f"Dense={stats.passage_dense_hits}, RRF={stats.passage_fused_hits}, "
+                    f"latency_ms={stats.passage_retrieval_ms}."
+                ),
+                before=stats.paper_fused_hits,
+                after=stats.passage_fused_hits,
+                latency_ms=stats.passage_retrieval_ms,
+            )
+            trace.record(
+                "rag_reranker",
+                (
+                    f"Passage reranker returned {stats.reranked_passages} passage(s); "
+                    f"cross_encoder={stats.reranker_used}; "
+                    f"fallback={stats.fallback_reason or '<none>'}, "
+                    f"latency_ms={stats.reranker_ms}."
+                ),
+                before=stats.passage_fused_hits,
+                after=stats.reranked_passages,
+                candidates=rag_suggestions,
+                identity=suggestion_identity,
+                latency_ms=stats.reranker_ms,
+            )
+            trace.record(
+                "rag_total",
+                f"Progressive RAG retrieval completed in {stats.total_ms} ms.",
+                before=stats.documents_seen,
+                after=len(rag_suggestions),
+                latency_ms=stats.total_ms,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            stats = RagRetrievalStats(fallback_reason=f"{type(exc).__name__}: {exc}")
+            trace.record(
+                "rag_fallback",
+                "Local RAG failed; legacy metadata retrieval is used explicitly.",
+                before=len(corpus),
+                after=0,
+                error=stats.fallback_reason,
+            )
+            _log(state.get("logger"), f"RAG retrieval failed: {stats.fallback_reason}")
+
+        if not rag_suggestions:
+            fallback = BibRepository(
+                workspace_path=str(state["params"].get("workspace_path") or ""),
+                file_path=str(state["params"].get("file_path") or ""),
+            ).search(state["claim"], limit=state["metadata_limit"])
+            if source_config.zotero_enabled and source_config.zotero_endpoint:
+                fallback = execute_zotero_search(
+                    recommender_module.ZoteroClient(
+                        endpoint=source_config.zotero_endpoint,
+                        timeout_seconds=source_config.zotero_timeout_seconds,
+                        collection_keys=source_config.zotero_collection_keys,
+                        logger=state.get("logger"),
+                    ),
+                    claim=state["claim"],
+                    limit=state["metadata_limit"],
+                    query_phrases=state["retrieval_plan"].queries,
+                    metadata_limit=state["metadata_limit"],
+                    fallback_candidates=fallback,
+                )
+            rag_suggestions = fallback
+            trace.record(
+                "rag_fallback",
+                f"RAG returned no candidates; legacy retrieval returned {len(fallback)} candidate(s).",
+                before=len(corpus),
+                after=len(fallback),
+                error=stats.fallback_reason,
+            )
+        suggestions = rag_suggestions
+        record_target_stage(
+            state["target_trace"],
+            "rag_retrieval",
+            rag_suggestions,
+            state["debug_targets"],
+            note=f"returned={len(rag_suggestions)}, target_specific_query=false",
+        )
+    else:
+        stats = RagRetrievalStats(fallback_reason="RAG disabled")
+
     return {
         **state,
         "zotero_suggestions": zotero_suggestions,
+        "rag_suggestions": rag_suggestions,
+        "rag_stats": stats,
         "forced_target_probe_suggestions": forced_target_probe_suggestions,
         "suggestions": suggestions,
     }
@@ -562,6 +793,20 @@ def dedupe_candidates_node(state: RecommendationGraphState) -> RecommendationGra
 def scope_filter_node(state: RecommendationGraphState) -> RecommendationGraphState:
     trace = state["trace"]
     trace.start("scope_filter")
+    if state["rag_config"].enabled:
+        scoped = list(state["deduped"])
+        trace.record(
+            "scope_filter",
+            (
+                "RAG collection scope was already enforced during corpus sync; "
+                "semantic scope is kept as a ranking signal and removed 0 candidates."
+            ),
+            before=len(scoped),
+            after=len(scoped),
+            candidates=scoped,
+            identity=suggestion_identity,
+        )
+        return {**state, "scoped": scoped, "scope_filtered": []}
     scoped, scope_filtered = partition_excluded_scope_candidates(
         state["deduped"],
         state["profile"],
@@ -868,6 +1113,8 @@ def finalize_recommendations_node(state: RecommendationGraphState) -> Recommenda
     diagnostic_suggestions = trace.attach_candidate_trace(diagnostic_suggestions, suggestion_identity)
     candidate_counts = {
         "current_bib_candidates": len(state["bib_suggestions"]),
+        "zotero_corpus_documents": len(state["zotero_suggestions"]),
+        "rag_retrieved_candidates": len(state["rag_suggestions"]),
         "forced_debug_candidates": len(state["forced_target_probe_suggestions"]),
         "all_recalled_candidates": len(state["suggestions"]),
         "deduped_candidates": len(state["deduped"]),
@@ -933,7 +1180,10 @@ def persist_run_node(state: RecommendationGraphState) -> RecommendationGraphStat
         params=state["params"],
         run_id=trace.run_id,
         model_snapshot=state["model_snapshot"],
-        source_snapshot=state["source_snapshot"],
+        source_snapshot={
+            **state["source_snapshot"],
+            "rag_stats": state.get("rag_stats", RagRetrievalStats()).to_dict(),
+        },
         claim_profile=profile,
         retrieval_plan=retrieval_plan,
         candidate_counts=candidate_counts,

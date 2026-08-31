@@ -1,5 +1,16 @@
 # Change Log
 
+## 0.21.0
+
+- Replaced query-only metadata retrieval with a persistent, Collection-scoped local RAG corpus.
+- Added section-aware parent/child PDF chunks with sentence overlap, page metadata and evidence-quality filtering.
+- Added paper-level and passage-level BM25/Dense retrieval with weighted reciprocal-rank fusion.
+- Added optional FastEmbed Cross-Encoder passage reranking with deterministic and BM25-only fallbacks.
+- Added incremental SQLite/FTS5 indexing, index reuse, RAG Trace stages and workspace settings.
+- Reused RAG-selected passages directly during LLM evidence verification instead of reparsing each PDF.
+- Changed foreground ingestion to metadata-first retrieval and lazy PDF indexing for only the top paper-level finalists.
+- Added per-stage RAG latency metrics and configurable `ragPdfIndexTopK` to control first-query cost.
+
 ## 0.20.0
 
 - Added durable SQLite checkpoints after each LangGraph node.

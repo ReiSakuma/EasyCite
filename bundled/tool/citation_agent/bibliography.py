@@ -137,6 +137,17 @@ class BibRepository:
                 )
         return dedupe_entries(entries)
 
+    def all_suggestions(self, limit: int = 500) -> list[CitationSuggestion]:
+        """Return the project bibliography as an unranked RAG corpus."""
+        return [
+            entry_to_suggestion(
+                entry,
+                score=0.50,
+                reason="Loaded from the current TeX project's bibliography for local RAG indexing.",
+            )
+            for entry in self.load_entries()[: max(limit, 0)]
+        ]
+
     def find_bib_files(self) -> list[Path]:
         referenced = self._bib_files_referenced_by_tex()
         if referenced:

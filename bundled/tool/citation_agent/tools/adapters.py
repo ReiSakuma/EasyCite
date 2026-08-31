@@ -57,6 +57,42 @@ def build_default_registry() -> ToolRegistry:
     )
     registry.register(
         ToolDefinition(
+            name="zotero.list_scope",
+            version="1.0.0",
+            description="Read the citable corpus in the configured Zotero Collection scope.",
+            input_schema={
+                "client": object,
+                "limit": int,
+                "resolve_pdf_paths": bool,
+                "fallback_candidates": list,
+            },
+            required_fields=("client", "limit", "fallback_candidates"),
+            output_validator=lambda value: isinstance(value, list),
+            timeout_policy=TimeoutPolicy(300.0),
+            retry_policy=RetryPolicy(max_retries=1, initial_backoff_seconds=0.2),
+            fallback_chain=("current_bib.search",),
+            capabilities=("rag_corpus", "zotero", "read_only"),
+            handler=_zotero_scope_handler,
+            health_check=_zotero_health,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="zotero.resolve_pdfs",
+            version="1.0.0",
+            description="Resolve Zotero PDF attachments for paper-level RAG finalists only.",
+            input_schema={"client": object, "paper_ids": list},
+            required_fields=("client", "paper_ids"),
+            output_validator=lambda value: isinstance(value, dict),
+            timeout_policy=TimeoutPolicy(90.0),
+            retry_policy=RetryPolicy(max_retries=1, initial_backoff_seconds=0.15),
+            capabilities=("rag_corpus", "pdf", "zotero", "read_only"),
+            handler=_zotero_pdf_resolution_handler,
+            health_check=_zotero_health,
+        )
+    )
+    registry.register(
+        ToolDefinition(
             name="better_bibtex.export",
             version="1.0.0",
             description="Export trusted BibTeX through Better BibTeX JSON-RPC.",
@@ -110,6 +146,20 @@ def build_default_registry() -> ToolRegistry:
             timeout_policy=TimeoutPolicy(90.0),
             retry_policy=RetryPolicy(max_retries=0),
             capabilities=("embedding", "semantic_ranking", "read_only"),
+            health_check=_embedding_health,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="reranker.rank",
+            version="1.0.0",
+            description="Rerank a bounded evidence-passage set with a local Cross-Encoder.",
+            input_schema={"query": str, "texts": (list, tuple)},
+            required_fields=("query", "texts"),
+            output_validator=lambda value: isinstance(value, list),
+            timeout_policy=TimeoutPolicy(120.0),
+            retry_policy=RetryPolicy(max_retries=0),
+            capabilities=("reranking", "semantic_ranking", "read_only"),
             health_check=_embedding_health,
         )
     )
@@ -170,6 +220,35 @@ def execute_zotero_search(
     ).value
 
 
+def execute_zotero_scope_list(
+    client: Any,
+    *,
+    limit: int,
+    resolve_pdf_paths: bool = False,
+    fallback_candidates: list[Any] | None = None,
+) -> list[Any]:
+    timeout = max(float(getattr(client, "timeout_seconds", 4.0)) * max(limit, 10), 30.0)
+    return get_default_executor().execute(
+        "zotero.list_scope",
+        {
+            "client": client,
+            "limit": int(limit),
+            "resolve_pdf_paths": resolve_pdf_paths,
+            "fallback_candidates": list(fallback_candidates or []),
+        },
+        timeout_seconds=min(timeout, 300.0),
+    ).value
+
+
+def execute_zotero_pdf_resolution(client: Any, paper_ids: list[str]) -> dict[str, str]:
+    timeout = max(float(getattr(client, "timeout_seconds", 4.0)) * max(len(paper_ids), 2), 10.0)
+    return get_default_executor().execute(
+        "zotero.resolve_pdfs",
+        {"client": client, "paper_ids": list(paper_ids)},
+        timeout_seconds=min(timeout, 90.0),
+    ).value
+
+
 def execute_better_bibtex_export(client: Any, citation_keys: list[str]) -> str | None:
     timeout = max(float(getattr(client, "timeout_seconds", 4.0)) * 2.5, 5.0)
     return get_default_executor().execute(
@@ -191,6 +270,18 @@ def execute_embedding(texts: Sequence[str], operation: Callable[[], Any]) -> Any
     return get_default_executor().execute(
         "embedding.rank",
         {"texts": list(texts)},
+        operation=lambda _inputs: operation(),
+    ).value
+
+
+def execute_reranker(
+    query: str,
+    texts: Sequence[str],
+    operation: Callable[[], list[float]],
+) -> list[float]:
+    return get_default_executor().execute(
+        "reranker.rank",
+        {"query": query, "texts": list(texts)},
         operation=lambda _inputs: operation(),
     ).value
 
@@ -224,6 +315,31 @@ def _zotero_search_handler(inputs: dict[str, Any]) -> list[Any]:
         query_phrases=inputs.get("query_phrases"),
         metadata_limit=inputs.get("metadata_limit"),
     )
+    last_error = getattr(client, "last_error", None)
+    if last_error and not result:
+        raise last_error
+    return result
+
+
+def _zotero_scope_handler(inputs: dict[str, Any]) -> list[Any]:
+    client = inputs["client"]
+    if hasattr(client, "clear_last_error"):
+        client.clear_last_error()
+    result = client.list_scope(
+        limit=inputs["limit"],
+        resolve_pdf_paths=bool(inputs.get("resolve_pdf_paths", False)),
+    )
+    last_error = getattr(client, "last_error", None)
+    if last_error and not result:
+        raise last_error
+    return result
+
+
+def _zotero_pdf_resolution_handler(inputs: dict[str, Any]) -> dict[str, str]:
+    client = inputs["client"]
+    if hasattr(client, "clear_last_error"):
+        client.clear_last_error()
+    result = client.resolve_pdf_paths(inputs["paper_ids"])
     last_error = getattr(client, "last_error", None)
     if last_error and not result:
         raise last_error
