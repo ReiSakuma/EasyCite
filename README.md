@@ -1,6 +1,6 @@
 # EasyCite
 
-EasyCite 是一款面向 LaTeX 科研写作的 VS Code 扩展。它可以识别可能缺少引用的论断，从当前 BibTeX 工程和 Zotero 文献库召回候选论文，读取摘要与 PDF 证据，并通过本地语义模型和外部 LLM 判断候选文献是否真正支持原句。
+EasyCite 是一款面向 LaTeX 科研写作的 VS Code 扩展。它可以识别可能缺少引用的论断，将当前 BibTeX 工程和指定 Zotero Collection 组织为本地 RAG 语料库，通过论文级与段落级混合检索找到候选及证据，并由外部 LLM 判断候选文献是否真正支持原句。
 
 EasyCite 不会直接替用户决定引用。所有候选、证据和 BibTeX 写入计划都会先进入审核界面，由用户确认后再修改 TeX 与 `.bib` 文件。
 
@@ -28,6 +28,7 @@ TeX Claim
   -> 当前 BibTeX / Zotero Collection 语料同步
   -> 标题与 DOI 去重
   -> 论文级 BM25 + Dense + RRF 召回
+  -> 为高相关论文懒加载并增量索引 PDF
   -> 段落级 BM25 + Dense + RRF 召回
   -> Cross-Encoder Evidence 精排
   -> LLM 证据验证
@@ -48,7 +49,7 @@ TeX Claim
 | 模型 API | 可选但推荐；支持 OpenAI、DeepSeek、OpenRouter 和 OpenAI-Compatible 服务 |
 | 网络 | 首次安装 Python 依赖、调用外部 LLM、首次下载 Embedding 模型时需要 |
 
-没有 Zotero、模型 API、Embedding 或 PDF 解析器时，EasyCite 仍可以使用当前 `.bib` 和本地规则运行，但推荐质量和可验证性会下降。
+没有 Zotero 时，EasyCite 仍可为当前 `.bib` 建立本地 RAG；Embedding 不可用时降级为 BM25，PDF 不可用时使用摘要和元数据，模型 API 不可用时使用本地证据规则。降级后仍可运行，但语义召回和证据判断质量会下降。
 
 ## 安装扩展
 
@@ -180,7 +181,7 @@ EasyCite: 配置模型服务
 
 ### 第四步：本地 RAG 与 Embedding 模型
 
-推荐选择“启用本地 embedding 检索”，保持默认模型：
+推荐选择“启用本地 RAG 语义检索”，保持默认模型：
 
 ```text
 BAAI/bge-small-en-v1.5
@@ -195,6 +196,25 @@ RAG 的默认流程为：论文级 BM25 + Dense 召回、RRF 融合、段落级 
 高级设置 `citation-agent.ragPdfIndexTopK` 控制单次前台查询最多新增索引多少篇 PDF，默认值为 `12`。减小它可以降低首次等待时间，但更多候选会暂时只使用摘要证据。
 
 `hash embedding` 只用于离线开发测试，不具备真实语义检索能力。
+
+## RAG 检索逻辑
+
+EasyCite 的 RAG 不会把整篇论文直接发送给 LLM，也不会只根据标题做一次简单排序。一次候选检查分为以下阶段：
+
+1. **语料范围同步**：读取当前工程 `.bib` 和用户选中的 Zotero Collection。Collection 决定允许参与检索的文献范围。
+2. **增量索引**：将标题、作者、摘要及已有 PDF Chunk 写入项目私有 SQLite/FTS5 索引；通过元数据、PDF 修改时间、文件大小和模型版本判断是否需要更新。
+3. **论文级召回**：针对 Claim 与 LLM 查询规划结果，分别执行 BM25 词法召回和本地 Dense Embedding 召回，再用 RRF 融合两个排名。
+4. **PDF 懒加载**：论文级召回后，默认只为前 12 篇高相关论文定位 Zotero PDF 并建立内容索引，避免每次等待全库 PDF 解析。已经索引的 PDF 会在后续查询中复用。
+5. **段落级召回与精排**：在候选论文的摘要和 PDF Chunk 中再次执行 BM25 + Dense + RRF，并使用 Cross-Encoder 对少量高相关段落精排。Chunk 按章节和句子边界切分，保留 parent context、页码和 overlap。
+6. **证据验证**：只把最终筛出的少量 Evidence Passage、Claim 和必要上下文交给 LLM，区分直接支持、基础性支持、部分支持、仅相关和证据不足。
+
+RAG 索引默认保存在当前工程：
+
+```text
+.citation-agent/rag.sqlite3
+```
+
+“查看候选引用”只打开上一次审核结果；“重新审计此范围”会重新执行查询规划、混合召回、精排和 LLM 验证，但会复用未变化的本地索引。
 
 ### 第五步：PDF 读取
 
@@ -234,7 +254,7 @@ EasyCite 会解析主 TeX、`\input`/`\include` 文件和 bibliography 声明，
 1. 在 `.tex` 文件中选中一个需要引用的完整句子或短段落。
 2. 按 `Ctrl+Shift+P`。
 3. 运行 `EasyCite: 检查选中内容`。
-4. 等待查询规划、Zotero 检索、PDF Evidence 与 LLM 验证完成。
+4. 等待查询规划、RAG 论文召回、PDF Passage 检索与 LLM 验证完成。
 
 ### 审核候选文献
 
@@ -305,8 +325,17 @@ EasyCite: 清空项目记忆
 {
   "citation-agent.zoteroEnabled": true,
   "citation-agent.zoteroEndpoint": "http://127.0.0.1:23119/api",
+  "citation-agent.ragEnabled": true,
+  "citation-agent.ragMaxDocuments": 500,
+  "citation-agent.ragChildChunkTokens": 280,
+  "citation-agent.ragChunkOverlapTokens": 48,
+  "citation-agent.ragParentChunkTokens": 900,
+  "citation-agent.ragPaperFusedTopK": 30,
+  "citation-agent.ragPdfIndexTopK": 12,
+  "citation-agent.ragPassageFusedTopK": 50,
+  "citation-agent.ragRerankerEnabled": true,
+  "citation-agent.ragRerankerModelId": "Xenova/ms-marco-MiniLM-L-6-v2",
   "citation-agent.maxSuggestions": 5,
-  "citation-agent.maxMetadataCandidates": 50,
   "citation-agent.maxAbstractCandidates": 8,
   "citation-agent.maxEvidencePassages": 5,
   "citation-agent.enableEvidenceVerification": true,
@@ -337,9 +366,11 @@ EasyCite: 清空项目记忆
 
 运行 `EasyCite: 打开工具健康检查`，确认 EasyCite 使用的解释器。依赖必须安装在扩展检测到的 Python 或扩展私有目录中，而不是另一个 Conda 环境。
 
-### 第一次 Embedding 检索很慢
+### 第一次 RAG 检索很慢
 
-首次运行需要下载并初始化 ONNX 模型。后续会命中本地缓存。工具健康检查可以确认模型是否可用。
+首次运行可能需要下载并初始化 Embedding 与 Cross-Encoder ONNX 模型，同时为首批高相关 PDF 建立 Chunk 和向量。后续会复用模型缓存与 `.citation-agent/rag.sqlite3`。开发者模式下可打开运行 Trace，分别检查 `zotero_retrieval`、`rag_index_sync`、`rag_paper_hybrid_retrieval`、`rag_pdf_index`、`rag_passage_hybrid_retrieval`、`rag_reranker` 和 `rag_total` 的耗时。
+
+如果 `rag_pdf_index` 持续占用较长时间，可降低 `citation-agent.ragPdfIndexTopK`；如果 `evidence_verification` 最慢，则瓶颈来自外部 LLM，而不是本地 RAG。
 
 ### LLM 没有生效
 
@@ -394,7 +425,7 @@ npm run vsce-package-windows
 
 ```text
 src/                         VS Code 扩展与 Webview
-bundled/tool/citation_agent/ Python Agent、LangGraph、检索与证据验证
+bundled/tool/citation_agent/ Python Agent、LangGraph、RAG 与证据验证
 protocol/                    LSP/JSON Schema 协议
 eval/                        Eval Harness 与测试用例
 docs/                        各版本技术设计
