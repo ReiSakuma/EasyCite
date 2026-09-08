@@ -180,7 +180,20 @@ class RagRetriever:
 
         fallback_reasons = [
             item
-            for item in [sync.fallback_reason, hydration_error, reranker.fallback_reason]
+            for item in [
+                sync.fallback_reason,
+                pdf_sync.fallback_reason,
+                hydration_error,
+                reranker.fallback_reason,
+            ]
+            if item
+        ]
+        semantic_fallbacks = [
+            item
+            for item in [
+                sync.semantic_fallback_reason,
+                pdf_sync.semantic_fallback_reason,
+            ]
             if item
         ]
         stats = replace(
@@ -200,13 +213,34 @@ class RagRetriever:
             documents_reused=sync.documents_reused + pdf_sync.documents_reused,
             documents_failed=sync.documents_failed + pdf_sync.documents_failed,
             chunks_indexed=sync.chunks_indexed + pdf_sync.chunks_indexed,
+            paragraphs_indexed=sync.paragraphs_indexed + pdf_sync.paragraphs_indexed,
+            semantic_embedding_inputs=(
+                sync.semantic_embedding_inputs + pdf_sync.semantic_embedding_inputs
+            ),
+            semantic_parents=sync.semantic_parents + pdf_sync.semantic_parents,
+            semantic_boundaries=(
+                sync.semantic_boundaries + pdf_sync.semantic_boundaries
+            ),
+            adaptive_boundaries=(
+                sync.adaptive_boundaries + pdf_sync.adaptive_boundaries
+            ),
+            size_boundaries=sync.size_boundaries + pdf_sync.size_boundaries,
+            semantic_chunking_used=(
+                sync.semantic_chunking_used or pdf_sync.semantic_chunking_used
+            ),
             metadata_sync_ms=metadata_sync_ms,
             pdf_index_ms=pdf_index_ms,
+            semantic_chunking_ms=round(
+                sync.semantic_chunking_ms + pdf_sync.semantic_chunking_ms, 2
+            ),
             paper_retrieval_ms=paper_retrieval_ms,
             passage_retrieval_ms=passage_retrieval_ms,
             reranker_ms=reranker_ms,
             total_ms=elapsed_ms(total_started),
-            fallback_reason="; ".join(fallback_reasons) or None,
+            fallback_reason="; ".join(dict.fromkeys(fallback_reasons)) or None,
+            semantic_fallback_reason=(
+                "; ".join(dict.fromkeys(semantic_fallbacks)) or None
+            ),
         )
         return RagRetrievalResult(
             suggestions=suggestions[: self.config.paper_fused_top_k],

@@ -3,6 +3,7 @@
 out/**
 node_modules/**
 *.vsix
+*.zip
 src/**
 .gitignore
 .vscodeignore*

@@ -10,7 +10,7 @@ EasyCite 不会直接替用户决定引用。所有候选、证据和 BibTeX 写
 - 检查选中的 Claim，并结合段落上下文理解待引用观点。
 - 将当前 `.bib` 与所选 Zotero Collection 同步为项目私有、可增量更新的本地 RAG 语料库。
 - 在论文级和段落级分别执行 BM25 + Dense 双路召回，并通过 RRF 融合与 Cross-Encoder 精排。
-- 按章节和句子边界切分摘要/PDF，使用 parent-child chunk 保留证据页码与上下文。
+- 先按 PDF 版面、列位置、行距和缩进重建自然段，再以自适应语义边界生成 parent-child chunk，保留证据页码与上下文。
 - 使用 LLM 完成查询规划、证据验证和中英对照，区分直接支持、部分支持、基础性支持与证据不足。
 - 在候选审核界面比较论文、证据、页码、DOI、来源和 Citation Key。
 - 支持多选引用，在英文句末标点前插入 `\cite{...}`。
@@ -57,8 +57,8 @@ TeX Claim
 
 在 GitHub Releases 下载与环境匹配的文件：
 
-- Windows 本地 VS Code：`easycite-v21-Windows.vsix`
-- Linux 或运行在 WSL Remote Extension Host 中的 VS Code：`easycite-v21.vsix`
+- Windows 本地 VS Code：`easycite-v22-Windows.vsix`
+- Linux 或运行在 WSL Remote Extension Host 中的 VS Code：`easycite-v22.vsix`
 
 如果以前安装过旧版扩展，请先卸载旧扩展，避免两个版本注册相同的兼容命令。
 
@@ -69,19 +69,19 @@ TeX Claim
 1. 打开左侧“扩展”。
 2. 点击扩展面板右上角的 `...`。
 3. 选择“从 VSIX 安装...”。
-4. 选择下载的 `easycite-v21*.vsix`。
+4. 选择下载的 `easycite-v22*.vsix`。
 5. 安装完成后点击“重新加载”。
 
 也可以在终端安装：
 
 ```bash
-code --install-extension easycite-v21.vsix
+code --install-extension easycite-v22.vsix
 ```
 
 Windows PowerShell：
 
 ```powershell
-code --install-extension .\easycite-v21-Windows.vsix
+code --install-extension .\easycite-v22-Windows.vsix
 ```
 
 ### 3. WSL 用户注意事项
@@ -205,7 +205,7 @@ EasyCite 的 RAG 不会把整篇论文直接发送给 LLM，也不会只根据�
 2. **增量索引**：将标题、作者、摘要及已有 PDF Chunk 写入项目私有 SQLite/FTS5 索引；通过元数据、PDF 修改时间、文件大小和模型版本判断是否需要更新。
 3. **论文级召回**：针对 Claim 与 LLM 查询规划结果，分别执行 BM25 词法召回和本地 Dense Embedding 召回，再用 RRF 融合两个排名。
 4. **PDF 懒加载**：论文级召回后，默认只为前 12 篇高相关论文定位 Zotero PDF 并建立内容索引，避免每次等待全库 PDF 解析。已经索引的 PDF 会在后续查询中复用。
-5. **段落级召回与精排**：在候选论文的摘要和 PDF Chunk 中再次执行 BM25 + Dense + RRF，并使用 Cross-Encoder 对少量高相关段落精排。Chunk 按章节和句子边界切分，保留 parent context、页码和 overlap。
+5. **段落级召回与精排**：在候选论文的摘要和 PDF Chunk 中再次执行 BM25 + Dense + RRF，并使用 Cross-Encoder 对少量高相关段落精排。系统先依据列位置、行距和缩进将 PDF 文本块重建为自然段，再结合固定阈值与章节内相似度低谷识别主题边界；短排版碎片与邻近正文共享语义编码，但原文仍完整保留。Child overlap 不会跨越语义 Parent。
 6. **证据验证**：只把最终筛出的少量 Evidence Passage、Claim 和必要上下文交给 LLM，区分直接支持、基础性支持、部分支持、仅相关和证据不足。
 
 RAG 索引默认保存在当前工程：
@@ -330,6 +330,16 @@ EasyCite: 清空项目记忆
   "citation-agent.ragChildChunkTokens": 280,
   "citation-agent.ragChunkOverlapTokens": 48,
   "citation-agent.ragParentChunkTokens": 900,
+  "citation-agent.ragSemanticChunkingEnabled": true,
+  "citation-agent.ragSemanticBoundaryThreshold": 0.45,
+  "citation-agent.ragSemanticHardBoundaryThreshold": 0.30,
+  "citation-agent.ragSemanticMinParentTokens": 180,
+  "citation-agent.ragSemanticAdaptiveEnabled": true,
+  "citation-agent.ragSemanticAdaptivePercentile": 0.20,
+  "citation-agent.ragSemanticAdaptiveMaxThreshold": 0.72,
+  "citation-agent.ragSemanticMinScoreDrop": 0.08,
+  "citation-agent.ragSemanticContextWindow": 2,
+  "citation-agent.ragSemanticEmbeddingMinTokens": 24,
   "citation-agent.ragPaperFusedTopK": 30,
   "citation-agent.ragPdfIndexTopK": 12,
   "citation-agent.ragPassageFusedTopK": 50,
@@ -368,7 +378,7 @@ EasyCite: 清空项目记忆
 
 ### 第一次 RAG 检索很慢
 
-首次运行可能需要下载并初始化 Embedding 与 Cross-Encoder ONNX 模型，同时为首批高相关 PDF 建立 Chunk 和向量。后续会复用模型缓存与 `.citation-agent/rag.sqlite3`。开发者模式下可打开运行 Trace，分别检查 `zotero_retrieval`、`rag_index_sync`、`rag_paper_hybrid_retrieval`、`rag_pdf_index`、`rag_passage_hybrid_retrieval`、`rag_reranker` 和 `rag_total` 的耗时。
+首次运行可能需要下载并初始化 Embedding 与 Cross-Encoder ONNX 模型，同时为首批高相关 PDF 建立 Chunk 和向量。v0.22 会先重建真实 PDF 自然段，再用整篇批量 Embedding 和章节内自适应低谷识别主题边界；短碎片会合并参与语义编码，Child overlap 只发生在同一语义 Parent 内。后续会复用模型缓存与 `.citation-agent/rag.sqlite3`。开发者模式下可打开运行 Trace，分别检查 `zotero_retrieval`、`rag_index_sync`、`rag_paper_hybrid_retrieval`、`rag_pdf_index`、`rag_semantic_chunking`、`rag_passage_hybrid_retrieval`、`rag_reranker` 和 `rag_total` 的耗时。
 
 如果 `rag_pdf_index` 持续占用较长时间，可降低 `citation-agent.ragPdfIndexTopK`；如果 `evidence_verification` 最慢，则瓶颈来自外部 LLM，而不是本地 RAG。
 
@@ -418,8 +428,8 @@ npm run vsce-package-windows
 
 输出文件：
 
-- `easycite-v21.vsix`
-- `easycite-v21-Windows.vsix`
+- `easycite-v22.vsix`
+- `easycite-v22-Windows.vsix`
 
 ## 项目结构
 

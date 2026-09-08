@@ -140,6 +140,10 @@ class RagChunk:
     chunk_type: str
     quality_score: float
     quality_flags: tuple[str, ...] = ()
+    paragraph_start: int | None = None
+    paragraph_end: int | None = None
+    boundary_reason: str = "section"
+    boundary_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,13 @@ class RagRetrievalStats:
     documents_reused: int = 0
     documents_failed: int = 0
     chunks_indexed: int = 0
+    paragraphs_indexed: int = 0
+    semantic_embedding_inputs: int = 0
+    semantic_parents: int = 0
+    semantic_boundaries: int = 0
+    adaptive_boundaries: int = 0
+    size_boundaries: int = 0
+    semantic_chunking_used: bool = False
     paper_lexical_hits: int = 0
     paper_dense_hits: int = 0
     paper_fused_hits: int = 0
@@ -171,11 +182,13 @@ class RagRetrievalStats:
     pdf_documents_hydrated: int = 0
     metadata_sync_ms: float = 0.0
     pdf_index_ms: float = 0.0
+    semantic_chunking_ms: float = 0.0
     paper_retrieval_ms: float = 0.0
     passage_retrieval_ms: float = 0.0
     reranker_ms: float = 0.0
     total_ms: float = 0.0
     fallback_reason: str | None = None
+    semantic_fallback_reason: str | None = None
     index_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:

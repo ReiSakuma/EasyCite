@@ -2,7 +2,7 @@
     "name": "easycite",
     "displayName": "EasyCite",
     "description": "Verifiable citation recommendations for LaTeX writing.",
-    "version": "0.21.0",
+    "version": "0.22.0",
     "preview": true,
     "serverInfo": {
         "name": "EasyCite",
@@ -72,8 +72,8 @@
         "test": "node ./out/test/runTest.js",
         "vendor-python-runtime": ".venv/bin/python scripts/vendor_python_runtime.py",
         "eval": ".venv/bin/python eval/run_eval.py --cases eval/cases/nerf_slam_claims.jsonl --output eval/reports/latest.json --markdown-output eval/reports/latest.md",
-        "vsce-package": "vsce package --no-dependencies -o easycite-v21.vsix",
-        "vsce-package-windows": "vsce package --no-dependencies --ignoreFile .vscodeignore.windows --target win32-x64 -o easycite-v21-Windows.vsix"
+        "vsce-package": "vsce package --no-dependencies -o easycite-v22.vsix",
+        "vsce-package-windows": "vsce package --no-dependencies --ignoreFile .vscodeignore.windows --target win32-x64 -o easycite-v22-Windows.vsix"
     },
     "contributes": {
         "configuration": {
@@ -329,9 +329,93 @@
                 },
                 "citation-agent.ragParentChunkTokens": {
                     "default": 900,
-                    "description": "Target token size of parent chunks retained for section context.",
+                    "description": "Hard token ceiling for semantic parent chunks retained as evidence context.",
                     "minimum": 300,
                     "maximum": 3000,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticChunkingEnabled": {
+                    "default": true,
+                    "description": "Split PDF parents at paragraph-level semantic topic boundaries using the configured local embedding model.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.ragSemanticBoundaryThreshold": {
+                    "default": 0.45,
+                    "description": "Soft paragraph boundary threshold after the minimum parent size is reached. Higher values create more semantic parents.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticHardBoundaryThreshold": {
+                    "default": 0.3,
+                    "description": "Hard paragraph boundary threshold applied even to short parents when adjacent topics are strongly different.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticMinParentTokens": {
+                    "default": 180,
+                    "description": "Minimum parent size before a soft semantic boundary may split the text.",
+                    "minimum": 0,
+                    "maximum": 1200,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticAdaptiveEnabled": {
+                    "default": true,
+                    "description": "Detect relative topic changes from local similarity valleys when absolute similarities remain high.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "citation-agent.ragSemanticAdaptivePercentile": {
+                    "default": 0.2,
+                    "description": "Section-local similarity percentile used as the adaptive semantic boundary threshold.",
+                    "minimum": 0.05,
+                    "maximum": 0.5,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticAdaptiveMaxThreshold": {
+                    "default": 0.72,
+                    "description": "Upper bound for the adaptive semantic boundary threshold.",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticMinScoreDrop": {
+                    "default": 0.08,
+                    "description": "Minimum local similarity drop required before an adaptive topic boundary is accepted.",
+                    "minimum": 0,
+                    "maximum": 0.5,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticContextWindow": {
+                    "default": 2,
+                    "description": "Number of paragraphs compared on each side of a possible semantic boundary.",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragSemanticEmbeddingMinTokens": {
+                    "default": 24,
+                    "description": "Short PDF layout fragments below this size share a semantic embedding with adjacent prose while remaining intact in searchable text.",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "scope": "resource",
+                    "type": "number"
+                },
+                "citation-agent.ragEmbeddingBatchSize": {
+                    "default": 64,
+                    "description": "Paragraph embedding batch size used while incrementally indexing PDFs.",
+                    "minimum": 8,
+                    "maximum": 256,
                     "scope": "resource",
                     "type": "number"
                 },

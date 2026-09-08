@@ -14,11 +14,11 @@ from ..cache import default_cache_dir, stable_text_hash
 from ..config import EmbeddingConfig, RagConfig
 from ..embedding.embedder import BaseEmbedder, EmbeddingUnavailable, create_embedder
 from ..tools.adapters import execute_embedding
-from .chunking import chunk_document
+from .chunking import chunk_document_with_stats
 from .models import RagChunk, RagDocument, RagRetrievalStats
 
 
-SCHEMA_VERSION = "v21.rag.1"
+SCHEMA_VERSION = "v22.rag.1"
 
 
 class RagIndex:
@@ -40,10 +40,15 @@ class RagIndex:
     def sync(self, documents: list[RagDocument], *, rebuild_index: bool = False) -> RagRetrievalStats:
         unique = {document.document_id: document for document in documents if document.document_id and document.title}
         indexed = reused = failed = chunks_indexed = 0
+        paragraphs_indexed = semantic_embedding_inputs = semantic_parents = semantic_boundaries = adaptive_boundaries = size_boundaries = 0
+        semantic_chunking_ms = 0.0
+        semantic_chunking_used = False
+        semantic_fallbacks: list[str] = []
         with self._connect() as conn:
             self._ensure_schema(conn)
             for incoming in list(unique.values())[: self.config.max_documents]:
                 document = incoming
+                restored_indexed_pdf = False
                 existing = conn.execute(
                     "SELECT fingerprint, metadata_json FROM rag_documents WHERE document_id = ?",
                     (document.document_id,),
@@ -53,14 +58,45 @@ class RagIndex:
                         indexed_document = RagDocument.from_dict(json.loads(str(existing[1])))
                         if indexed_document.pdf_path:
                             document = replace(document, pdf_path=indexed_document.pdf_path)
+                            restored_indexed_pdf = True
                     except (TypeError, ValueError, json.JSONDecodeError):
                         pass
                 fingerprint = document_fingerprint(document, self.config, self.embedding_config)
                 if existing and str(existing[0]) == fingerprint and not rebuild_index:
                     reused += 1
                     continue
+                if restored_indexed_pdf:
+                    # A metadata or chunker change must not eagerly reparse every
+                    # previously indexed PDF. The paper-level Top-K hydrates it later.
+                    document = incoming
+                    fingerprint = document_fingerprint(
+                        document, self.config, self.embedding_config
+                    )
                 try:
-                    chunks = chunk_document(document, self.config)
+                    chunking_started = time.perf_counter()
+                    chunking = chunk_document_with_stats(
+                        document,
+                        self.config,
+                        paragraph_embedder=(
+                            self._embed_paragraphs
+                            if self.config.semantic_chunking_enabled
+                            and self.embedding_config.enabled
+                            else None
+                        ),
+                    )
+                    semantic_chunking_ms += (time.perf_counter() - chunking_started) * 1000
+                    chunks = list(chunking.chunks)
+                    paragraphs_indexed += chunking.stats.paragraphs
+                    semantic_embedding_inputs += chunking.stats.semantic_embedding_inputs
+                    semantic_parents += chunking.stats.parents
+                    semantic_boundaries += chunking.stats.semantic_boundaries
+                    adaptive_boundaries += chunking.stats.adaptive_boundaries
+                    size_boundaries += chunking.stats.size_boundaries
+                    semantic_chunking_used = (
+                        semantic_chunking_used or chunking.stats.semantic_used
+                    )
+                    if chunking.stats.fallback_reason:
+                        semantic_fallbacks.append(chunking.stats.fallback_reason)
                     paper_vector, chunk_vectors = self._embed_document(document, chunks)
                     self._replace_document(conn, document, fingerprint, chunks, paper_vector, chunk_vectors)
                     indexed += 1
@@ -76,8 +112,19 @@ class RagIndex:
             documents_reused=reused,
             documents_failed=failed,
             chunks_indexed=chunks_indexed,
+            paragraphs_indexed=paragraphs_indexed,
+            semantic_embedding_inputs=semantic_embedding_inputs,
+            semantic_parents=semantic_parents,
+            semantic_boundaries=semantic_boundaries,
+            adaptive_boundaries=adaptive_boundaries,
+            size_boundaries=size_boundaries,
+            semantic_chunking_used=semantic_chunking_used,
+            semantic_chunking_ms=round(semantic_chunking_ms, 2),
             embedding_used=self._embedder is not None and self._embedding_error is None,
             fallback_reason=self._embedding_error,
+            semantic_fallback_reason=(
+                "; ".join(dict.fromkeys(semantic_fallbacks)) or None
+            ),
             index_path=str(self.db_path),
         )
 
@@ -147,7 +194,8 @@ class RagIndex:
             self._ensure_schema(conn)
             rows = conn.execute(
                 f"""SELECT chunk_id, document_id, parent_id, ordinal, section, page_start,
-                    page_end, text, parent_text, chunk_type, quality_score, quality_flags_json
+                    page_end, text, parent_text, chunk_type, quality_score, quality_flags_json,
+                    paragraph_start, paragraph_end, boundary_reason, boundary_score
                     FROM rag_chunks WHERE chunk_id IN ({','.join('?' for _ in ids)})""",
                 ids,
             ).fetchall()
@@ -165,6 +213,10 @@ class RagIndex:
                 chunk_type=str(row[9]),
                 quality_score=float(row[10]),
                 quality_flags=tuple(json.loads(str(row[11]) or "[]")),
+                paragraph_start=int(row[12]) if row[12] is not None else None,
+                paragraph_end=int(row[13]) if row[13] is not None else None,
+                boundary_reason=str(row[14] or "section"),
+                boundary_score=float(row[15]) if row[15] is not None else None,
             )
             for row in rows
         }
@@ -231,6 +283,24 @@ class RagIndex:
         while len(chunk_vectors) < len(chunks):
             chunk_vectors.append(None)
         return paper, chunk_vectors
+
+    def _embed_paragraphs(self, texts: list[str]) -> list[list[float]]:
+        embedder = self._get_embedder()
+        if embedder is None:
+            raise EmbeddingUnavailable(
+                self._embedding_error or "embedding is disabled"
+            )
+        try:
+            vectors: list[list[float]] = []
+            for start in range(0, len(texts), self.config.embedding_batch_size):
+                batch = texts[start : start + self.config.embedding_batch_size]
+                vectors.extend(
+                    execute_embedding(batch, lambda batch=batch: embedder.embed(batch)).vectors
+                )
+            return vectors
+        except Exception as exc:  # pylint: disable=broad-except
+            self._embedding_error = f"{type(exc).__name__}: {exc}"
+            raise
 
     def _embed_queries(self, queries: list[str]) -> list[list[float]]:
         embedder = self._get_embedder()
@@ -300,8 +370,9 @@ class RagIndex:
                 """INSERT INTO rag_chunks(
                     chunk_id, document_id, parent_id, ordinal, section, page_start,
                     page_end, text, parent_text, chunk_type, quality_score,
-                    quality_flags_json, vector_json, model_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    quality_flags_json, vector_json, model_id, paragraph_start,
+                    paragraph_end, boundary_reason, boundary_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     chunk.chunk_id,
                     chunk.document_id,
@@ -317,6 +388,10 @@ class RagIndex:
                     json.dumps(chunk.quality_flags),
                     dump_vector(vector),
                     self.embedding_config.model_id if vector else None,
+                    chunk.paragraph_start,
+                    chunk.paragraph_end,
+                    chunk.boundary_reason,
+                    chunk.boundary_score,
                 ),
             )
             conn.execute(
@@ -343,9 +418,17 @@ class RagIndex:
                 ordinal INTEGER NOT NULL, section TEXT NOT NULL, page_start INTEGER, page_end INTEGER,
                 text TEXT NOT NULL, parent_text TEXT NOT NULL, chunk_type TEXT NOT NULL,
                 quality_score REAL NOT NULL, quality_flags_json TEXT NOT NULL,
-                vector_json TEXT, model_id TEXT
+                vector_json TEXT, model_id TEXT, paragraph_start INTEGER,
+                paragraph_end INTEGER, boundary_reason TEXT NOT NULL DEFAULT 'section',
+                boundary_score REAL
             )"""
         )
+        RagIndex._ensure_column(conn, "rag_chunks", "paragraph_start", "INTEGER")
+        RagIndex._ensure_column(conn, "rag_chunks", "paragraph_end", "INTEGER")
+        RagIndex._ensure_column(
+            conn, "rag_chunks", "boundary_reason", "TEXT NOT NULL DEFAULT 'section'"
+        )
+        RagIndex._ensure_column(conn, "rag_chunks", "boundary_score", "REAL")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rag_chunks_document ON rag_chunks(document_id, ordinal)"
         )
@@ -356,6 +439,19 @@ class RagIndex:
             "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunk_fts USING fts5(chunk_id UNINDEXED, document_id UNINDEXED, title, section, text)"
         )
         conn.execute(f"PRAGMA user_version = {schema_user_version(SCHEMA_VERSION)}")
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _log(self, message: str) -> None:
         if self.logger:
@@ -389,6 +485,16 @@ def document_fingerprint(
         "child": config.child_chunk_tokens,
         "parent": config.parent_chunk_tokens,
         "overlap": config.chunk_overlap_tokens,
+        "semantic_enabled": config.semantic_chunking_enabled,
+        "semantic_threshold": config.semantic_boundary_threshold,
+        "semantic_hard_threshold": config.semantic_hard_boundary_threshold,
+        "semantic_min_parent": config.semantic_min_parent_tokens,
+        "semantic_adaptive_enabled": config.semantic_adaptive_enabled,
+        "semantic_adaptive_percentile": config.semantic_adaptive_percentile,
+        "semantic_adaptive_max_threshold": config.semantic_adaptive_max_threshold,
+        "semantic_min_score_drop": config.semantic_min_score_drop,
+        "semantic_context_window": config.semantic_context_window,
+        "semantic_embedding_min_tokens": config.semantic_embedding_min_tokens,
         "embedding": embedding_config.model_id if embedding_config.enabled else "disabled",
     }
     return stable_text_hash(json.dumps(payload, ensure_ascii=False, sort_keys=True))

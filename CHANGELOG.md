@@ -1,5 +1,17 @@
 # Change Log
 
+## 0.22.0
+
+- Replaced fixed parent windows with paragraph-aware semantic parent boundaries.
+- Reused the configured local BGE embedding model to compare adjacent paragraphs and the current parent centroid.
+- Added soft and hard semantic thresholds, a parent token ceiling, and a paragraph-preserving fallback.
+- Prevented child overlap from crossing section or semantic-parent boundaries.
+- Persisted paragraph ranges, boundary reasons and boundary scores for indexed chunks.
+- Added semantic chunking statistics and the `rag_semantic_chunking` Trace stage.
+- Reconstructed logical paragraphs from PDF columns, line spacing and indentation instead of treating every PyMuPDF block as a paragraph.
+- Added section-local adaptive semantic valleys, contextual boundary scores and short-fragment embedding compaction.
+- Batched paragraph embeddings once per document and exposed embedding-input/adaptive-boundary counts in Trace.
+
 ## 0.21.0
 
 - Replaced query-only metadata retrieval with a persistent, Collection-scoped local RAG corpus.

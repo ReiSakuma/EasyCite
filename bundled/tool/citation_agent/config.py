@@ -191,7 +191,17 @@ class RagConfig:
     child_chunk_max_tokens: int = 420
     chunk_overlap_tokens: int = 48
     parent_chunk_tokens: int = 900
-    embedding_batch_size: int = 32
+    semantic_chunking_enabled: bool = True
+    semantic_boundary_threshold: float = 0.45
+    semantic_hard_boundary_threshold: float = 0.30
+    semantic_min_parent_tokens: int = 180
+    semantic_adaptive_enabled: bool = True
+    semantic_adaptive_percentile: float = 0.20
+    semantic_adaptive_max_threshold: float = 0.72
+    semantic_min_score_drop: float = 0.08
+    semantic_context_window: int = 2
+    semantic_embedding_min_tokens: int = 24
+    embedding_batch_size: int = 64
     paper_lexical_top_k: int = 50
     paper_dense_top_k: int = 50
     paper_fused_top_k: int = 30
@@ -207,7 +217,7 @@ class RagConfig:
     rrf_k: int = 60
     bm25_weight: float = 1.0
     dense_weight: float = 1.2
-    chunker_version: str = "v21.parent-child.1"
+    chunker_version: str = "v22.semantic-parent-child.2"
 
     @classmethod
     def from_env(cls) -> "RagConfig":
@@ -223,8 +233,38 @@ class RagConfig:
                 os.getenv("CITATION_AGENT_RAG_CHUNK_OVERLAP_TOKENS", "48")
             ),
             parent_chunk_tokens=int(os.getenv("CITATION_AGENT_RAG_PARENT_CHUNK_TOKENS", "900")),
+            semantic_chunking_enabled=_truthy(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_CHUNKING_ENABLED", "true")
+            ),
+            semantic_boundary_threshold=float(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_BOUNDARY_THRESHOLD", "0.45")
+            ),
+            semantic_hard_boundary_threshold=float(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_HARD_BOUNDARY_THRESHOLD", "0.30")
+            ),
+            semantic_min_parent_tokens=int(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_MIN_PARENT_TOKENS", "180")
+            ),
+            semantic_adaptive_enabled=_truthy(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_ADAPTIVE_ENABLED", "true")
+            ),
+            semantic_adaptive_percentile=float(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_ADAPTIVE_PERCENTILE", "0.20")
+            ),
+            semantic_adaptive_max_threshold=float(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_ADAPTIVE_MAX_THRESHOLD", "0.72")
+            ),
+            semantic_min_score_drop=float(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_MIN_SCORE_DROP", "0.08")
+            ),
+            semantic_context_window=int(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_CONTEXT_WINDOW", "2")
+            ),
+            semantic_embedding_min_tokens=int(
+                os.getenv("CITATION_AGENT_RAG_SEMANTIC_EMBEDDING_MIN_TOKENS", "24")
+            ),
             embedding_batch_size=int(
-                os.getenv("CITATION_AGENT_RAG_EMBEDDING_BATCH_SIZE", "32")
+                os.getenv("CITATION_AGENT_RAG_EMBEDDING_BATCH_SIZE", "64")
             ),
             paper_lexical_top_k=int(
                 os.getenv("CITATION_AGENT_RAG_PAPER_LEXICAL_TOP_K", "50")
@@ -261,6 +301,6 @@ class RagConfig:
             bm25_weight=float(os.getenv("CITATION_AGENT_RAG_BM25_WEIGHT", "1.0")),
             dense_weight=float(os.getenv("CITATION_AGENT_RAG_DENSE_WEIGHT", "1.2")),
             chunker_version=os.getenv(
-                "CITATION_AGENT_RAG_CHUNKER_VERSION", "v21.parent-child.1"
+                "CITATION_AGENT_RAG_CHUNKER_VERSION", "v22.semantic-parent-child.2"
             ),
         )

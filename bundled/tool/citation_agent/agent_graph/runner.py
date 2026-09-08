@@ -266,6 +266,10 @@ def initialize_node(state: RecommendationGraphState) -> RecommendationGraphState
             f"child_tokens={rag_config.child_chunk_tokens}, "
             f"overlap_tokens={rag_config.chunk_overlap_tokens}, "
             f"parent_tokens={rag_config.parent_chunk_tokens}, "
+            f"semantic_chunking={rag_config.semantic_chunking_enabled}, "
+            f"semantic_threshold={rag_config.semantic_boundary_threshold}, "
+            f"semantic_hard_threshold={rag_config.semantic_hard_boundary_threshold}, "
+            f"semantic_min_parent_tokens={rag_config.semantic_min_parent_tokens}, "
             f"embedding={'enabled' if embedding_config.enabled else 'disabled'}, "
             f"embedding_model={embedding_config.model_id}, "
             f"reranker={'enabled' if rag_config.reranker_enabled else 'disabled'}, "
@@ -674,6 +678,23 @@ def recall_zotero_node(state: RecommendationGraphState) -> RecommendationGraphSt
                 before=stats.pdf_documents_requested,
                 after=stats.pdf_documents_hydrated,
                 latency_ms=stats.pdf_index_ms,
+            )
+            trace.record(
+                "rag_semantic_chunking",
+                (
+                    f"Paragraph-aware semantic chunking: paragraphs={stats.paragraphs_indexed}, "
+                    f"embedding_inputs={stats.semantic_embedding_inputs}, "
+                    f"parents={stats.semantic_parents}, "
+                    f"semantic_boundaries={stats.semantic_boundaries}, "
+                    f"adaptive_boundaries={stats.adaptive_boundaries}, "
+                    f"size_boundaries={stats.size_boundaries}, "
+                    f"semantic_applied_this_run={stats.semantic_chunking_used}, "
+                    f"fallback={stats.semantic_fallback_reason or '<none>'}, "
+                    f"latency_ms={stats.semantic_chunking_ms}."
+                ),
+                before=stats.paragraphs_indexed,
+                after=stats.semantic_parents,
+                latency_ms=stats.semantic_chunking_ms,
             )
             trace.record(
                 "rag_passage_hybrid_retrieval",
